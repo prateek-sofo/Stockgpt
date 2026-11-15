@@ -139,7 +139,13 @@ if __name__ == "__main__":
     ap.add_argument("--provider", choices=["yahoo", "polygon", "tiingo", "csv"], default="yahoo")
     ap.add_argument("--start", default="2016-01-01")
     ap.add_argument("--free-tier", action="store_true", help="polygon: 5 requests/minute")
+    ap.add_argument("--update", action="store_true",
+                    help="append to the existing prices.parquet: refetch the last 7 days, keep older rows")
     a = ap.parse_args()
+    old = None
+    if a.update and OUT.exists():
+        old = pd.read_parquet(OUT)
+        a.start = (pd.to_datetime(old["date"]).max() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
     sec = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
     universe = set(sec["ticker"])
     if a.provider == "yahoo":
@@ -151,5 +157,9 @@ if __name__ == "__main__":
     else:
         df = from_files()
     df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    if old is not None:
+        old["date"] = pd.to_datetime(old["date"]).dt.normalize()
+        df = pd.concat([old[old["date"] < pd.Timestamp(a.start)], df], ignore_index=True)
+        df = df.drop_duplicates(["date", "ticker"], keep="last").sort_values(["date", "ticker"])
     df.to_parquet(OUT, index=False)
     print(f"prices: {len(df):,} rows, {df['ticker'].nunique():,} tickers, {df['date'].min():%Y-%m-%d} -> {df['date'].max():%Y-%m-%d}")

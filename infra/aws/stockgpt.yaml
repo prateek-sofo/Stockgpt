@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  StockGPT beside the Sofo World company database (us-east-2, db-1's VPC). One instance runs the daily data refresh,
+  the morning scan, the weekly retrain and the API/UI on 127.0.0.1:8000. No inbound ports: open the UI through an SSM
+  port-forwarding session (infra/aws/deploy.sh tunnel). Reads db-1 with a read-only role over the private network.
+
+Parameters:
+  VpcId: {Type: String, Default: vpc-0e09c6a6c1bc525f0, Description: "db-1's VPC"}
+  SubnetId: {Type: String, Default: subnet-031d1c16ec9a4b8a8, Description: "a subnet in db-1's VPC with outbound internet"}
+  ImageId: {Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>", Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}
+  InstanceType: {Type: String, Default: r7g.large, Description: "16 GB: the feature panel for ~3k tickers x 8y needs ~8 GB"}
+  DiskGb: {Type: Number, Default: 120}
+
+Resources:
+  Group:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: StockGPT - no inbound (SSM only); outbound for SEC, Yahoo Finance, packages and db-1
+      VpcId: !Ref VpcId
+      Tags: [{Key: Name, Value: stockgpt}]
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub stockgpt-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+      OwnershipControls: {Rules: [{ObjectOwnership: BucketOwnerEnforced}]}
+      BucketEncryption: {ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]}
+      LifecycleConfiguration:
+        Rules:
+          - {Id: old-releases, Status: Enabled, Prefix: releases/, ExpirationInDays: 60}
+          - {Id: old-briefs, Status: Enabled, Prefix: briefs/, NoncurrentVersionExpirationInDays: 400}
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Policies:
+        - PolicyName: stockgpt
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: ssm:GetParameter, Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/stockgpt/*"}
+              - {Effect: Allow, Action: [s3:GetObject, s3:PutObject], Resource: !Sub "${Bucket.Arn}/*"}
+              - {Effect: Allow, Action: s3:ListBucket, Resource: !GetAtt Bucket.Arn}
+
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {Roles: [!Ref Role]}
+
+  Box:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Profile
+      MetadataOptions: {HttpTokens: required, HttpEndpoint: enabled}
+      NetworkInterfaces: [{DeviceIndex: "0", SubnetId: !Ref SubnetId, AssociatePublicIpAddress: true, GroupSet: [!GetAtt Group.GroupId]}]
+      BlockDeviceMappings: [{DeviceName: /dev/xvda, Ebs: {VolumeSize: !Ref DiskGb, VolumeType: gp3, Encrypted: true}}]
+      Tags: [{Key: Name, Value: stockgpt}]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf install -y python3.12 python3.12-pip git tar nodejs20 npm cronie
+          useradd -r -m -d /srv/stockgpt -s /sbin/nologin stockgpt || true
+          install -d -o stockgpt -g stockgpt /srv/stockgpt/releases /srv/stockgpt/data/raw /srv/stockgpt/artifacts /etc/stockgpt
+          echo "STOCKGPT_BUCKET=${Bucket}" > /etc/stockgpt/bucket.env
+          echo "AWS_REGION=${AWS::Region}" >> /etc/stockgpt/bucket.env
+
+Outputs:
+  BoxId: {Value: !Ref Box}
+  GroupId: {Value: !GetAtt Group.GroupId}
+  BucketName: {Value: !Ref Bucket}

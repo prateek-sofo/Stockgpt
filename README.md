@@ -64,6 +64,24 @@ python -m stockgpt.pipeline
 
 Point-in-time guarantees: fundamentals are keyed by SEC *filing* date; earnings timing comes from the 8-K Item 2.02 acceptance timestamp (intraday releases count as after-close); Sofo World articles count from the later of publication and first crawl (capped at +6h), and dated events count from the next morning. Without an options feed, IV is estimated from realised volatility (flagged as `iv_source: estimated`), so option results are indicative until ORATS/ThetaData/Polygon options history is connected. EPS surprise uses year-ago EPS as the estimate until consensus estimates are connected.
 
+## Running on AWS beside Sofo World (db-1)
+
+Sofo World's company database (news, events, finance crawl) moves to **db-1** in us-east-2, a private instance. StockGPT
+runs on its own instance in db-1's VPC and reads it with a read-only role, the same pattern as the Command Center's cc-1.
+No inbound ports; the UI opens through an SSM tunnel. From the Mac (aws CLI signed in, hub tunnel on :5434):
+
+```bash
+infra/aws/deploy.sh box                                   # r7g.large, bucket, IAM role (stack "stockgpt", us-east-2)
+SOFO_ADMIN_URL=postgresql://<admin>@127.0.0.1:5434/sofo_world \
+  infra/aws/deploy.sh db <db-1 private IP> <db-1 security group id>   # read-only role, SG rule, SSM URL
+infra/aws/deploy.sh release                               # build UI, ship HEAD, start API + timers
+infra/aws/deploy.sh run full                              # first full data load + backtest (~1-2 h)
+infra/aws/deploy.sh tunnel                                # http://localhost:8000
+```
+
+Schedule on the box: weekdays 08:40 New York time (prices update, Sofo World news, morning scan; every brief is kept in
+S3 under `briefs/` as the live track record) and Sundays 06:00 (SEC bulk refresh, full retrain and backtest).
+
 ## How it works
 
 1. **Point-in-time features** (`features.py`). Each article is assigned to the first 09:00 ET scan that could see it. Prices through the prior close, plus premarket. 63 features: overnight sentiment (magnitude-weighted), event types, abnormal news volume, gap vs. sector, vol, IV, IV rank, earnings timing and surprise, fundamentals.
