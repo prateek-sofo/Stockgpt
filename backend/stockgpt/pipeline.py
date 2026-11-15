@@ -60,6 +60,20 @@ def final_model(panel, features, cal_slope):
     return m
 
 
+def _num(row, col, fn=float):
+    v = row.get(col, np.nan)
+    return fn(v) if pd.notna(v) else None
+
+
+def _row_stats(row) -> dict:
+    lov = row.get("log_opt_vol20", np.nan)
+    return dict(rv20=_num(row, "rv20"), iv30=_num(row, "iv30"), iv_rank=_num(row, "iv_rank"),
+                adv=float(10 ** row["log_adv20"]) if pd.notna(row.get("log_adv20")) else None,
+                opt_vol=float(10 ** lov - 1) if pd.notna(lov) else None,
+                spread=_num(row, "atm_spread"), days_to_earn=_num(row, "days_to_earn", int),
+                hist_earn_move=_num(row, "hist_earn_move"))
+
+
 def ticker_profiles(panel, sig, trades, tables, model):
     meta = tables["tickers"].set_index("ticker")
     news = score_news(tables["news"])
@@ -114,12 +128,7 @@ def ticker_profiles(panel, sig, trades, tables, model):
             liquid=bool(lm.get(tk, False)), prices=prices, news=nitems, traits=trait_hist,
             earnings=earn, performance=perf,
             model=model.ticker_model(row) if row is not None else {},
-            stats=dict(rv20=float(row.rv20), iv30=float(row.iv30) if pd.notna(row.iv30) else None,
-                       iv_rank=float(row.iv_rank) if pd.notna(row.iv_rank) else None,
-                       adv=float(10 ** row.log_adv20), opt_vol=float(10 ** row.log_opt_vol20 - 1),
-                       spread=float(row.atm_spread) if pd.notna(row.atm_spread) else None,
-                       days_to_earn=int(row.days_to_earn), hist_earn_move=float(row.hist_earn_move)
-                       if pd.notna(row.hist_earn_move) else None) if row is not None else {},
+            stats=_row_stats(row) if row is not None else {},
         )
         _write(f"tickers/{tk}.json", prof)
         index.append(dict(ticker=tk, name=prof["name"], sector=prof["sector"], liquid=prof["liquid"],
@@ -135,7 +144,7 @@ def ticker_profiles(panel, sig, trades, tables, model):
     _write("universe.json", index)
 
 
-def run(scan_only: bool = False):
+def run(scan_only: bool = False, reuse: bool = False):
     t0 = time.time()
     log("loading data")
     tables, source = load_all()
@@ -145,9 +154,12 @@ def run(scan_only: bool = False):
     log(f"panel {panel.shape}  features={len(feats)}")
 
     bt_path = ARTIFACT_DIR / "oos_predictions.parquet"
-    if scan_only and bt_path.exists():
+    if (scan_only or reuse) and bt_path.exists():
         preds = pd.read_parquet(bt_path)
-        cal = json.loads((ARTIFACT_DIR / "backtest.json").read_text())["model"]["cal_slope"]
+        bt_json = ARTIFACT_DIR / "backtest.json"
+        cal = json.loads(bt_json.read_text())["model"]["cal_slope"] if bt_json.exists() else 0.5
+        if reuse and preds.index.nlevels == 2:
+            preds = preds[preds.index.isin(panel.index)]
     else:
         log("walk-forward backtest")
         preds, info = walk_forward(panel, feats, progress=lambda a, b: log(f"  block {a}/{b}") if a % 5 == 0 else None)
@@ -205,4 +217,7 @@ def run(scan_only: bool = False):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--scan", action="store_true", help="refit final model and run the morning scan only")
-    run(scan_only=ap.parse_args().scan)
+    ap.add_argument("--reuse-backtest", action="store_true",
+                    help="reuse artifacts/oos_predictions.parquet instead of re-running the walk-forward")
+    args = ap.parse_args()
+    run(scan_only=args.scan, reuse=args.reuse_backtest)

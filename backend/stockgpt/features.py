@@ -204,6 +204,12 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
         panel["news_5d_wsent"] = ws.rolling(5, min_periods=1).sum().shift(1).stack(future_stack=True)
         panel["sent_x_gap"] = panel["news_on_wsent"] * np.sign(panel["gap_pre"])
         panel["sent_gap_divergence"] = panel["news_on_wsent"] - panel["gap_pre_z"] * 0.3
+    else:
+        # no news feed connected yet: neutral news features so every downstream step still runs
+        for col in ("news_on_count", "news_on_sent_mean", "news_on_wsent", "news_on_sent_max", "news_on_sent_min",
+                    "news_on_mag_max", "news_prior_wsent", "news_abnormal", "news_5d_wsent", "sent_x_gap",
+                    "sent_gap_divergence", *[f"ev_{e}" for e in EVENTS]):
+            panel[col] = 0.0
 
     # fundamentals (as of the latest report_date < t)
     fund = tables.get("fundamentals")
