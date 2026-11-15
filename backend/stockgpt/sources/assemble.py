@@ -24,6 +24,10 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
     # ETP (6221) or unit investment trust (6726)
     sic = pd.to_numeric(t["sic"], errors="coerce")
     t = t[sic.notna() & ~sic.isin([6770, 6221, 6726])]
+    # One registrant with many tickers is an ETN issuer (e.g. a bank's notes) or a stack of preferreds:
+    # keep its primary ticker. Two or three share classes (GOOG/GOOGL, BRK.A/BRK.B) are kept as listed.
+    n = t.groupby("cik")["ticker"].transform("size")
+    t = t[(n <= 3) | ~t.duplicated("cik")]
     px = pd.read_parquet(DATA_DIR / "prices.parquet")
     px["date"] = pd.to_datetime(px["date"]).dt.normalize().astype("datetime64[ns]")
     px = px[(px["date"] >= start) & px["ticker"].isin(t["ticker"])]
