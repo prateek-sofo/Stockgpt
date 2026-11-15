@@ -168,7 +168,8 @@ def run(scan_only: bool = False):
         mc = {col: monte_carlo(curve, col, start=SETTINGS.risk.starting_capital) for col in ("options", "stock")}
         lt = longterm.backtest(panel)
         top_tickers = (sig[sig["liquid"] & sig["z_oc"].notna()].groupby(level="ticker")
-                       .apply(lambda g: g["mu"].corr(g["z_oc"], method="spearman")).dropna().sort_values())
+                       .apply(lambda g: g["mu"].corr(g["z_oc"], method="spearman") if len(g) >= 60 else np.nan)
+                       .dropna().sort_values())
         _write("backtest.json", dict(
             period=dict(start=curve["date"].iloc[0], end=curve["date"].iloc[-1], days=len(curve)),
             strategies=strat, curve=curve.to_dict("records"),

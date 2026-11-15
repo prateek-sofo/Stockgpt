@@ -56,6 +56,7 @@ LLM news scoring: `STOCKGPT_LLM_SCORING=1` scores headlines with Claude via stru
 | Shares day trade | +200% | 1.9 | −15% | 53.6% win rate, profit factor 1.25 |
 | Earnings straddles | +12% | 0.8 | −6% | ~1% risk per trade, selective |
 | Options day trade | −3% | −0.1 | −16% | EV calibration cut trading to 90 trades |
+| Long-term top quintile | +10.4%/yr vs −4.9% universe | IR 1.9 | | beat universe in 72% of months |
 
 Signal: daily IC 0.050; top-minus-bottom decile ≈ 40 bps/day. Intraday long options did not overcome theta + spread + IV premium in this market; the system learned to mostly stay out. These numbers describe the synthetic market only. Rerun on real data to measure the real edge.
 
