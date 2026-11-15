@@ -21,7 +21,7 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
              ever_dollar_volume: float = 20e6) -> dict:
     t = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
     px = pd.read_parquet(DATA_DIR / "prices.parquet")
-    px["date"] = pd.to_datetime(px["date"]).dt.normalize()
+    px["date"] = pd.to_datetime(px["date"]).dt.normalize().astype("datetime64[ns]")
     px = px[(px["date"] >= start) & px["ticker"].isin(t["ticker"])]
     # common stocks with enough history and a tradable price
     # Names that were ever tradable size (60d avg $ volume). This only bounds the dataset; whether a
@@ -36,6 +36,7 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
 
     fund = pd.read_parquet(DATA_DIR / "sec_fundamentals.parquet")
     fund = fund[fund["ticker"].isin(keep)].copy()
+    fund["report_date"] = pd.to_datetime(fund["report_date"]).astype("datetime64[ns]")
     # P/E at the filing date: close that day / trailing-4-quarter EPS
     fund = fund.sort_values(["ticker", "period_end"])
     fund["eps_ttm"] = fund.groupby("ticker")["eps"].transform(lambda s: s.rolling(4, min_periods=4).sum())

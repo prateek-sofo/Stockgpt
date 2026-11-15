@@ -57,6 +57,12 @@ class HierarchicalModel:
         self.lin_mu, self.lin_sd = XL.mean(0), XL.std(0) + 1e-9
         y = df["z_oc"].values
         self.ridge = Ridge(alpha=50.0).fit((XL - self.lin_mu) / self.lin_sd, y)
+        # Gradient boosting on the most recent rows only (keeps refits fast on the full universe;
+        # the ridge core above still sees every row)
+        cap = SETTINGS.model.max_gbm_rows
+        if len(df) > cap:
+            df = df.sort_index(level="date").iloc[-cap:]
+            y = df["z_oc"].values
         X = df[self.features].astype(np.float32)
         p = dict(SETTINGS.model.gbm_params)
         cons = {**p, "num_leaves": 15, "min_child_samples": 1000, "n_estimators": 400, "learning_rate": 0.02}

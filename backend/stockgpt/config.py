@@ -25,7 +25,8 @@ class UniverseConfig:
 class ModelConfig:
     # Walk-forward
     min_train_days: int = 250                   # ~1 trading year before first prediction
-    retrain_every_days: int = 21                # monthly refit
+    retrain_every_days: int = int(os.getenv("STOCKGPT_RETRAIN_DAYS", "21"))   # 21 = monthly refit
+    max_gbm_rows: int = int(os.getenv("STOCKGPT_MAX_GBM_ROWS", "1500000"))   # most recent rows for the GBMs
     embargo_days: int = 1                       # gap between train end and test start
     # Hierarchical blend: weight on ticker model = n / (n + shrinkage_k)
     shrinkage_k: int = 400
