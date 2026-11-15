@@ -52,6 +52,26 @@ def log(msg):
     print(f"[{datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
+def data_notes(panel, tables, source) -> list[dict]:
+    """What the backtest could not measure with the data it had. Shown on the Backtest page."""
+    notes = []
+    if source == "synthetic":
+        notes.append(dict(level="warn", text="Synthetic demo market: results describe the generator, not real markets."))
+        return notes
+    if not len(tables.get("news", [])):
+        notes.append(dict(level="warn", text="No news feed connected: the model ran on prices, fundamentals and "
+                          "earnings dates only. Connect Sofo World news (db-1 or the S3 export) for the news signal."))
+    if panel.attrs.get("iv_source") == "estimated":
+        notes.append(dict(level="warn", text="No historical options prices: IV is estimated from realised volatility. "
+                          "Option results are indicative; the earnings-straddle strategy is disabled because its edge "
+                          "(realised minus implied move) cannot be measured with an estimated implied move."))
+    notes.append(dict(level="info", text="Survivorship bias: the universe is today's SEC-listed companies, so stocks "
+                      "that were delisted (bankruptcies, acquisitions) are missing. Real results would be lower."))
+    notes.append(dict(level="info", text="Earnings surprise is measured against the same quarter a year earlier "
+                      "(no consensus estimates)."))
+    return notes
+
+
 def final_model(panel, features, cal_slope):
     last = panel.index.get_level_values("date").max()
     train = panel[panel.index.get_level_values("date") < last]
@@ -83,14 +103,16 @@ def ticker_profiles(panel, sig, trades, tables, model):
     latest = panel.xs(last, level="date")
     lm = liquid_mask(panel).xs(last, level="date")
     index = []
-    for tk in panel.index.get_level_values("ticker").unique():
-        p = panel.xs(tk, level="ticker")
-        s = sig.xs(tk, level="ticker") if tk in sig.index.get_level_values("ticker") else None
+    by_tk = {tk: g.droplevel("ticker") for tk, g in panel.groupby(level="ticker")}
+    sig_tk = {tk: g.droplevel("ticker") for tk, g in sig.groupby(level="ticker")}
+    news_tk = dict(tuple(news.groupby("ticker"))) if len(news) else {}
+    for tk, p in by_tk.items():
+        s = sig_tk.get(tk)
         hist = p.tail(260)
         prices = [dict(d=str(d.date()), o=r.open_px, h=r.high_px, l=r.low_px, c=r.close_px,
                        s=r.news_on_wsent, n=int(r.news_on_count), e=int(r.is_earnings))
                   for d, r in hist.iterrows() if pd.notna(r.close_px)]
-        nn = news[news["ticker"] == tk].sort_values("published_at", ascending=False).head(60)
+        nn = news_tk.get(tk, news.iloc[:0]).sort_values("published_at", ascending=False).head(60)
         nitems = [dict(t=r.published_at.tz_convert(ET).strftime("%Y-%m-%d %H:%M"), h=r.headline,
                        s=float(r.sentiment), m=float(r.magnitude), e=r.event, src=getattr(r, "source", ""),
                        d=str(r.date.date()), on=bool(r.overnight))
@@ -167,7 +189,8 @@ def run(scan_only: bool = False, reuse: bool = False):
         cal = info["last_model"].cal_slope
 
     sig = build_signals(panel, preds)
-    res = simulate(sig)
+    vendor_iv = panel.attrs.get("iv_source", "vendor") == "vendor"
+    res = simulate(sig, straddles=vendor_iv)
     curve, trades = res["curve"], res["trades"]
     log("final model + scan")
     model = final_model(panel, feats, cal)
@@ -195,6 +218,7 @@ def run(scan_only: bool = False, reuse: bool = False):
                            edges=np.histogram(top_tickers.dropna(), bins=20)[1].tolist()),
             trades=trades.tail(800).to_dict("records") if len(trades) else [],
             costs=SETTINGS.costs.__dict__, risk=SETTINGS.risk.__dict__,
+            data_notes=data_notes(panel, tables, source),
         ))
         _write("longterm.json", dict(ranking=longterm.current_ranking(panel, tables["tickers"]), backtest=lt))
         log("ticker profiles")

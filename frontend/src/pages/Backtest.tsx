@@ -42,6 +42,17 @@ export default function Backtest() {
         sub={`Walk-forward, out-of-sample only · ${data.period.start} → ${data.period.end} · ${data.period.days} sessions · monthly refit, 1-day embargo · costs and spreads included`}
         right={<Tabs value={k} onChange={setK} items={(Object.keys(STRATS) as K[]).map((v) => ({ v, label: STRATS[v].name }))} />} />
 
+      {!!data.data_notes?.length && (
+        <div className="mb-4 space-y-2">
+          {data.data_notes.map((n, i) => (
+            <div key={i} className={clsx("card flex items-start gap-3 px-4 py-2.5 text-[12.5px]",
+              n.level === "warn" ? "border-amber/35 text-ink-200" : "text-ink-400")}>
+              <span className={clsx("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", n.level === "warn" ? "bg-amber" : "bg-ink-500")} />
+              {n.text}
+            </div>))}
+        </div>)}
+      {k === "earnings_straddle" && !s.trades && (
+        <div className="card mb-4 px-5 py-4 text-[13px] text-ink-300">No straddle trades: this strategy needs historical options prices to be measured.</div>)}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-8">
         <Stat label="Total return" value={<span className={tone(s.total_return)}>{pct(s.total_return, 0)}</span>} sub={`${usd(s.start)} → ${usd(s.end)}`} />
         <Stat label="CAGR" value={<span className={tone(s.cagr)}>{pct(s.cagr, 1)}</span>} />

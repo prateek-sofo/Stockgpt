@@ -153,7 +153,9 @@ def _select(day: pd.DataFrame):
     return c.nlargest(r.max_positions, "ev_cal")
 
 
-def simulate(sig: pd.DataFrame) -> dict:
+def simulate(sig: pd.DataFrame, straddles: bool = True) -> dict:
+    """straddles=False when IV is estimated: a straddle's edge is (realised move - implied move), and
+    an estimated implied move makes that number an artefact of the estimate, not a measurement."""
     r = SETTINGS.risk
     eq_o = eq_s = eq_e = r.starting_capital
     curve, trades = [], []
@@ -185,7 +187,7 @@ def simulate(sig: pd.DataFrame) -> dict:
                                    risk_frac=round(notional, 4), pnl=round(float(eq_s * notional * row.stock_ret), 2),
                                    stock_move=round(float(row.r_oc), 4), hit=int(row.hit), earnings=int(row.is_earnings)))
         # earnings straddles (entered at prior close, priced at prior-day IV)
-        er = day[(day["is_earnings"] == 1) & day["liquid"] & day["hist_earn_move"].notna()]
+        er = day[(day["is_earnings"] == 1) & day["liquid"] & day["hist_earn_move"].notna()] if straddles else day.iloc[:0]
         pnl_e = 0.0
         if len(er):
             S0, S1 = er["prev_close"].values, er["close_px"].values

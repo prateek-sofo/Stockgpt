@@ -68,6 +68,7 @@ export interface Backtest {
   model: { cal_slope: number; importances: { feature: string; importance: number }[]; coefficients: Record<string, number>; features: number };
   ticker_ic: { best: { ticker: string; ic: number }[]; worst: { ticker: string; ic: number }[]; dist: number[]; edges: number[] };
   trades: Trade[]; costs: Record<string, number>; risk: Record<string, number>;
+  data_notes?: { level: "warn" | "info"; text: string }[];
 }
 
 export interface UniverseRow {
