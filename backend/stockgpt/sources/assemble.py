@@ -20,6 +20,10 @@ from ..config import DATA_DIR
 def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int = 120,
              ever_dollar_volume: float = 20e6) -> dict:
     t = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
+    # operating companies only: an SEC industry code, and not a blank-check shell (6770), commodity pool /
+    # ETP (6221) or unit investment trust (6726)
+    sic = pd.to_numeric(t["sic"], errors="coerce")
+    t = t[sic.notna() & ~sic.isin([6770, 6221, 6726])]
     px = pd.read_parquet(DATA_DIR / "prices.parquet")
     px["date"] = pd.to_datetime(px["date"]).dt.normalize().astype("datetime64[ns]")
     px = px[(px["date"] >= start) & px["ticker"].isin(t["ticker"])]
