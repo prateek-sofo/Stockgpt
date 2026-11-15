@@ -17,14 +17,21 @@ import pandas as pd
 from ..config import DATA_DIR
 
 
-def assemble(start: str = "2018-01-01", min_price: float = 3.0, min_history: int = 120) -> dict:
+def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int = 120,
+             ever_dollar_volume: float = 20e6) -> dict:
     t = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
     px = pd.read_parquet(DATA_DIR / "prices.parquet")
     px["date"] = pd.to_datetime(px["date"]).dt.normalize()
     px = px[(px["date"] >= start) & px["ticker"].isin(t["ticker"])]
     # common stocks with enough history and a tradable price
+    # Names that were ever tradable size (60d avg $ volume). This only bounds the dataset; whether a
+    # name is tradable on a given day is decided point-in-time by universe.liquid_mask.
+    px["dv"] = px["close"] * px["volume"]
+    dv60 = px.groupby("ticker")["dv"].transform(lambda x: x.rolling(60, min_periods=20).mean())
+    peak = dv60.groupby(px["ticker"]).max()
     stats = px.groupby("ticker").agg(n=("close", "size"), last=("close", "last"))
-    keep = stats[(stats["n"] >= min_history) & (stats["last"] >= min_price)].index
+    keep = stats[(stats["n"] >= min_history) & (stats["last"] >= min_price)
+                 & (peak.reindex(stats.index) >= ever_dollar_volume)].index
     px = px[px["ticker"].isin(keep)].sort_values(["date", "ticker"])
 
     fund = pd.read_parquet(DATA_DIR / "sec_fundamentals.parquet")
@@ -68,7 +75,7 @@ def assemble(start: str = "2018-01-01", min_price: float = 3.0, min_history: int
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--start", default="2018-01-01")
+    ap.add_argument("--start", default="2019-01-01")
     a = ap.parse_args()
     for name, df in assemble(a.start).items():
         df.to_parquet(DATA_DIR / f"{name}.parquet", index=False)

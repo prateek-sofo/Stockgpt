@@ -241,6 +241,8 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
         bump = np.sqrt(panel["ivw_prev"] ** 2 + (panel["hist_earn_move"] * 0.8) ** 2 * 365 / 7)
         panel["ivw_prev"] = panel["ivw_prev"].where(~pre, bump)
     panel = add_ticker_traits(panel)
+    f64 = panel.select_dtypes("float64").columns
+    panel[f64] = panel[f64].astype(np.float32)            # halves memory on the real universe
     panel.attrs["iv_source"] = iv_source
     return panel
 

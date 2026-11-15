@@ -51,7 +51,7 @@ def test_features_do_not_see_future(small):
     past = panel.index.get_level_values("date") <= cut           # traits at `cut` use outcomes < cut
     a = panel.loc[past, [f for f in feats if f.startswith(("tr_", "tx_"))]]
     b = p2.loc[past, a.columns]
-    pd.testing.assert_frame_equal(a, b)
+    pd.testing.assert_frame_equal(a, b, check_dtype=False, rtol=1e-4, atol=1e-6)   # float32 panel
 
 
 def test_targets_not_in_features(small):
