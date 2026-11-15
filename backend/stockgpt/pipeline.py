@@ -195,6 +195,7 @@ def run(scan_only: bool = False):
                              data_start=str(dates.min().date()), data_end=str(dates.max().date()),
                              tickers=int(len(tables["tickers"])), news=int(len(tables["news"])),
                              universe=brief["universe_size"], features=len(feats),
+                             iv_source=panel.attrs.get("iv_source", "vendor"),
                              runtime_sec=round(time.time() - t0, 1),
                              config=dict(universe=SETTINGS.universe.__dict__, risk=SETTINGS.risk.__dict__,
                                          options=SETTINGS.options.__dict__)))

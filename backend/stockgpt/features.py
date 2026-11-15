@@ -126,6 +126,18 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
         feats["ivw_prev"] = ivw.shift(1)
         feats["event_premium"] = ivw.shift(1) / iv          # >1 = event priced into front week
         iv_today = ivw                # end-of-day IV on t: used only to price exits
+        iv_source = "vendor"
+    else:
+        # No options feed: estimate IV from realised vol plus a typical 10% variance premium, and
+        # the ATM spread from dollar volume. Option-strategy results are then indicative only.
+        rv_long = lr.ewm(span=60, min_periods=20).std() * np.sqrt(252)
+        iv_est = np.maximum(sig20 * np.sqrt(252), rv_long.shift(1)) * 1.10
+        feats["iv30"] = iv_est
+        feats["iv_rank"] = iv_est.rolling(252, min_periods=60).rank(pct=True)
+        feats["ivw_prev"] = iv_est
+        feats["atm_spread"] = (0.015 + 0.5 / np.sqrt(adv20 / 1e6)).clip(0.015, 0.3)
+        iv_today = np.maximum(lr.ewm(span=20, min_periods=10).std() * np.sqrt(252), rv_long) * 1.10
+        iv_source = "estimated"
 
     panel = pd.concat({k: df.stack(future_stack=True) for k, df in feats.items()}, axis=1)
     panel.index.names = ["date", "ticker"]
@@ -213,8 +225,7 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
         "open_px": o, "close_px": c, "prev_close": pc,
         "high_px": h, "low_px": l,
     }
-    if len(tables.get("options", [])):
-        targ["ivw_t"] = iv_today
+    targ["ivw_t"] = iv_today
     tg = pd.concat({k: df.stack(future_stack=True) for k, df in targ.items()}, axis=1)
     tg.index.names = ["date", "ticker"]
     panel = panel.join(tg)
@@ -223,7 +234,15 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     panel["z_oc"] = (panel["r_oc"] / panel["sig_d"]).clip(-6, 6)
     panel = panel.replace([np.inf, -np.inf], np.nan)
     panel = panel[panel["rv20"].notna()].sort_index()
-    return add_ticker_traits(panel)
+    if iv_source == "estimated" and "hist_earn_move" in panel:
+        # front-week IV before a report: price the ticker's own average earnings move (fair-pricing
+        # assumption, so estimated-IV straddle backtests carry no built-in edge)
+        pre = panel["days_to_earn"].between(1, 5) & panel["hist_earn_move"].notna()
+        bump = np.sqrt(panel["ivw_prev"] ** 2 + (panel["hist_earn_move"] * 0.8) ** 2 * 365 / 7)
+        panel["ivw_prev"] = panel["ivw_prev"].where(~pre, bump)
+    panel = add_ticker_traits(panel)
+    panel.attrs["iv_source"] = iv_source
+    return panel
 
 
 # (input feature, prior strength). Prior strength = how many "units of evidence" the market-wide

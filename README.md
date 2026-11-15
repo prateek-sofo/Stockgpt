@@ -40,6 +40,30 @@ Drop parquet or CSV files named after each table into `data/raw/`. Full spec in 
 
 LLM news scoring: `STOCKGPT_LLM_SCORING=1` scores headlines with Claude via structured outputs (`nlp/sentiment.py`); defaults to the fast lexicon scorer.
 
+## Real data: SEC + Sofo World + prices
+
+```bash
+cd backend
+# 1. SEC (free): tickers + sectors, point-in-time XBRL fundamentals, earnings dates with BMO/AMC timing
+curl -A "StockGPT research you@example.com" -o ../data/raw/sec/companyfacts.zip https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip
+curl -A "StockGPT research you@example.com" -o ../data/raw/sec/submissions.zip  https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip
+curl -A "StockGPT research you@example.com" -o ../data/raw/sec/company_tickers_exchange.json https://www.sec.gov/files/company_tickers_exchange.json
+python -m stockgpt.sources.sec                      # ~4 min: 7.6k tickers, 150k filings, 134k earnings dates
+
+# 2. Sofo World news + events (read-only role; from a machine that reaches the hub, e.g. the Mac tunnel :5434)
+SOFO_DATABASE_URL=postgresql://<readonly>@127.0.0.1:5434/sofo_world python -m stockgpt.sources.sofo_world --since 2018-01-01
+
+# 3. Daily prices (needs a key): Polygon grouped-daily = 1 request per day for all US stocks
+POLYGON_API_KEY=... python -m stockgpt.sources.prices --provider polygon --start 2016-01-01
+#    or TIINGO_API_KEY=... --provider tiingo, or --provider csv for files in data/raw/prices/
+
+# 4. Merge into the contract and run
+python -m stockgpt.sources.assemble --start 2018-01-01
+python -m stockgpt.pipeline
+```
+
+Point-in-time guarantees: fundamentals are keyed by SEC *filing* date; earnings timing comes from the 8-K Item 2.02 acceptance timestamp (intraday releases count as after-close); Sofo World articles count from the later of publication and first crawl (capped at +6h), and dated events count from the next morning. Without an options feed, IV is estimated from realised volatility (flagged as `iv_source: estimated`), so option results are indicative until ORATS/ThetaData/Polygon options history is connected. EPS surprise uses year-ago EPS as the estimate until consensus estimates are connected.
+
 ## How it works
 
 1. **Point-in-time features** (`features.py`). Each article is assigned to the first 09:00 ET scan that could see it. Prices through the prior close, plus premarket. 63 features: overnight sentiment (magnitude-weighted), event types, abnormal news volume, gap vs. sector, vol, IV, IV rank, earnings timing and surprise, fundamentals.
