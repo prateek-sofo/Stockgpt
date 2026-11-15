@@ -1,0 +1,282 @@
+"""Feature panel: one row per (trading date, ticker) with only information available at
+~09:00 ET on that date (the morning scan time), plus forward targets for training.
+
+Timing rules (no look-ahead):
+* prices / options: through the previous session close (t-1), plus the 09:00 premarket print.
+* news: published before 09:00 ET on t. Overnight news = since 16:00 ET on t-1. News published
+  during the t-1 session is a separate "prior session" feature.
+* earnings: a BMO report on t or AMC report on t-1 is known before the open.
+"""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from .nlp.sentiment import LexiconScorer
+
+ET = "America/New_York"
+EVENTS = ["earnings", "guidance", "analyst", "m&a", "regulatory", "legal", "product", "capital"]
+
+
+def score_news(news: pd.DataFrame, scorer=None) -> pd.DataFrame:
+    """Score unique headlines once (scrapes repeat a lot), then join back."""
+    scorer = scorer or LexiconScorer()
+    uniq = news["headline"].drop_duplicates()
+    scored = scorer.score(uniq.tolist())
+    scored.index = uniq.values
+    out = news.join(scored, on="headline")
+    return out
+
+
+def _assign_sessions(news: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.DataFrame:
+    """Map each article to the trading date whose morning scan first sees it."""
+    et = news["published_at"].dt.tz_convert(ET)
+    local = et.dt.tz_localize(None)
+    day = local.dt.normalize()
+    hour = local.dt.hour + local.dt.minute / 60
+    # 'cutoff' = the first scan (09:00 ET) at or after publication
+    scan_day = np.where(hour < 9.0, day, day + pd.Timedelta(days=1))
+    scan_day = pd.DatetimeIndex(scan_day)
+    pos = dates.searchsorted(scan_day)                     # next trading date >= scan_day
+    news = news.assign(_pos=pos, _hour=hour.values, _day=day.values)
+    news = news[news["_pos"] < len(dates)]
+    news["date"] = dates[news["_pos"].values]
+    # overnight = published after the previous session close
+    prev_close = np.where(news["_pos"] > 0, dates[np.maximum(news["_pos"] - 1, 0)], news["date"])
+    prev_close = pd.DatetimeIndex(prev_close) + pd.Timedelta(hours=16)
+    news["overnight"] = (local.loc[news.index].values >= prev_close.values)
+    return news.drop(columns=["_pos", "_hour", "_day"])
+
+
+def news_features(news_scored: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.DataFrame:
+    n = _assign_sessions(news_scored, dates)
+    n["wsent"] = n["sentiment"] * (0.3 + n["magnitude"])
+    g_on = n[n["overnight"]].groupby(["date", "ticker"])
+    f = pd.DataFrame({
+        "news_on_count": g_on.size(),
+        "news_on_sent_mean": g_on["sentiment"].mean(),
+        "news_on_wsent": g_on["wsent"].sum(),
+        "news_on_sent_max": g_on["sentiment"].max(),
+        "news_on_sent_min": g_on["sentiment"].min(),
+        "news_on_mag_max": g_on["magnitude"].max(),
+    })
+    for ev in EVENTS:
+        sub = n[n["overnight"] & (n["event"] == ev)].groupby(["date", "ticker"])["wsent"].sum()
+        f[f"ev_{ev}"] = sub
+    prior = n[~n["overnight"]].groupby(["date", "ticker"])["wsent"].sum().rename("news_prior_wsent")
+    f = f.join(prior, how="outer")
+    return f
+
+
+def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
+    prices = tables["prices"].sort_values(["date", "ticker"])
+    dates = pd.DatetimeIndex(sorted(prices["date"].unique()), name="date")
+    W = lambda col: prices.pivot(index="date", columns="ticker", values=col).reindex(dates)
+    o, h, l, c, v = W("open"), W("high"), W("low"), W("close"), W("volume")
+    pre = W("premarket") if "premarket" in prices else c.shift(1)
+    pc = c.shift(1)
+
+    lr = np.log(c / pc)
+    sig20 = lr.ewm(span=20, min_periods=10).std().shift(1)          # known at t
+    sig20 = sig20.fillna(lr.expanding(5).std().shift(1))
+    feats: dict[str, pd.DataFrame] = {}
+    gap = np.log(pre / pc)
+    feats["gap_pre"] = gap
+    feats["gap_pre_z"] = gap / sig20
+    feats["ret_1d_z"] = lr.shift(1) / sig20
+    feats["ret_5d_z"] = np.log(pc / c.shift(6)) / (sig20 * np.sqrt(5))
+    feats["ret_20d_z"] = np.log(pc / c.shift(21)) / (sig20 * np.sqrt(20))
+    feats["ret_60d_z"] = np.log(pc / c.shift(61)) / (sig20 * np.sqrt(60))
+    feats["rv20"] = sig20 * np.sqrt(252)
+    tr = pd.concat({"a": h - l, "b": (h - pc).abs(), "c": (l - pc).abs()}).groupby(level=1).max()
+    tr = tr.reindex(dates)
+    feats["atr14_pct"] = (tr.rolling(14).mean() / c).shift(1)
+    dv = v * c
+    adv20 = dv.rolling(20, min_periods=5).mean().shift(1)
+    feats["rel_volume_1d"] = (dv.shift(1) / adv20)
+    feats["log_adv20"] = np.log10(adv20)
+    feats["dist_20d_high"] = (pc / h.rolling(20).max().shift(1) - 1) / sig20
+    feats["dist_20d_low"] = (pc / l.rolling(20).min().shift(1) - 1) / sig20
+    feats["oc_autocorr_prev"] = np.log(c / o).shift(1) / sig20      # yesterday's intraday move
+    # market / sector context
+    mkt_gap = gap.mean(axis=1)
+    feats["mkt_gap"] = pd.DataFrame(np.repeat(mkt_gap.values[:, None], gap.shape[1], 1),
+                                    index=dates, columns=gap.columns)
+    mkt_ret = lr.mean(axis=1).shift(1)
+    feats["mkt_ret_1d"] = pd.DataFrame(np.repeat(mkt_ret.values[:, None], gap.shape[1], 1),
+                                       index=dates, columns=gap.columns)
+    sectors = tables["tickers"].set_index("ticker")["sector"].reindex(gap.columns)
+    sec_gap = gap.T.groupby(sectors.values).transform("mean").T
+    feats["sector_gap_rel"] = (gap - sec_gap) / sig20
+
+    # options context
+    if len(tables.get("options", [])):
+        op = tables["options"]
+        P = lambda col: op.pivot(index="date", columns="ticker", values=col).reindex(dates)[gap.columns]
+        iv = P("iv30").shift(1)
+        feats["iv30"] = iv
+        feats["iv_rv"] = iv / feats["rv20"]
+        feats["iv_rank"] = iv.rolling(252, min_periods=60).rank(pct=True)
+        ov = P("option_volume")
+        feats["opt_vol_rel"] = ov.shift(1) / ov.rolling(20, min_periods=5).mean().shift(1)
+        feats["log_opt_vol20"] = np.log10(ov.rolling(20, min_periods=5).mean().shift(1) + 1)
+        if "atm_spread_pct" in op:
+            feats["atm_spread"] = P("atm_spread_pct").shift(1)
+        ivw = P("iv_weekly") if "iv_weekly" in op else P("iv30")
+        feats["ivw_prev"] = ivw.shift(1)
+        feats["event_premium"] = ivw.shift(1) / iv          # >1 = event priced into front week
+        iv_today = ivw                # end-of-day IV on t: used only to price exits
+
+    panel = pd.concat({k: df.stack(future_stack=True) for k, df in feats.items()}, axis=1)
+    panel.index.names = ["date", "ticker"]
+
+    # earnings timing
+    e = tables.get("earnings")
+    if e is not None and len(e):
+        e = e.copy()
+        pos = dates.searchsorted(e["report_date"])
+        e["react_pos"] = pos + (e["timing"].eq("AMC")).astype(int)
+        e = e[e["react_pos"] < len(dates)]
+        e["date"] = dates[e["react_pos"].values]
+        if {"eps_actual", "eps_estimate"} <= set(e.columns):
+            e["eps_surprise"] = (e["eps_actual"] / e["eps_estimate"].replace(0, np.nan) - 1).clip(-1, 1)
+        else:
+            e["eps_surprise"] = np.nan
+        react = e.set_index(["date", "ticker"])[["eps_surprise"]]
+        react = react[~react.index.duplicated()]
+        panel = panel.join(react)
+        panel["is_earnings"] = panel.index.isin(react.index).astype(np.int8)
+        # days to next / since last reaction day
+        rd = e[["ticker", "react_pos"]]
+        dn = np.full((len(dates), len(gap.columns)), 999.0)
+        ds = np.full_like(dn, 999.0)
+        tt = np.arange(len(dates))
+        colpos = {t: j for j, t in enumerate(gap.columns)}
+        for tk, grp in rd.groupby("ticker"):
+            if tk not in colpos:
+                continue
+            idx = np.sort(grp["react_pos"].values)
+            p = np.searchsorted(idx, tt)                     # next >= t
+            ok = p < len(idx)
+            dn[ok, colpos[tk]] = idx[p[ok]] - tt[ok]
+            q = np.searchsorted(idx, tt) - 1                 # previous < t
+            okq = q >= 0
+            ds[okq, colpos[tk]] = tt[okq] - idx[q[okq]]
+        panel["days_to_earn"] = pd.DataFrame(dn, index=dates, columns=gap.columns).stack().values
+        panel["days_since_earn"] = pd.DataFrame(ds, index=dates, columns=gap.columns).stack().values
+        # past earnings reaction size for this ticker (|close-to-close| on prior reaction days)
+        cc = lr.stack(future_stack=True)
+        cc.index.names = ["date", "ticker"]
+        er = cc[panel["is_earnings"] == 1].abs().rename("earn_abs")
+        er = er.reset_index().sort_values("date")
+        er["hist_earn_move"] = er.groupby("ticker")["earn_abs"].transform(
+            lambda s: s.shift(1).expanding().mean())
+        panel = panel.join(er.set_index(["date", "ticker"])["hist_earn_move"])
+        panel["hist_earn_move"] = panel.groupby(level="ticker")["hist_earn_move"].ffill()
+    else:
+        for col in ("eps_surprise", "is_earnings", "days_to_earn", "days_since_earn", "hist_earn_move"):
+            panel[col] = np.nan
+
+    # news
+    news = tables["news"]
+    if len(news):
+        ns = score_news(news, scorer)
+        nf = news_features(ns, dates)
+        panel = panel.join(nf)
+        fill0 = [c for c in nf.columns]
+        panel[fill0] = panel[fill0].fillna(0.0)
+        cnt = panel["news_on_count"].unstack()
+        base = cnt.rolling(60, min_periods=10).mean().shift(1)
+        panel["news_abnormal"] = ((cnt - base) / (base + 0.5)).stack(future_stack=True)
+        ws = panel["news_on_wsent"].unstack()
+        panel["news_5d_wsent"] = ws.rolling(5, min_periods=1).sum().shift(1).stack(future_stack=True)
+        panel["sent_x_gap"] = panel["news_on_wsent"] * np.sign(panel["gap_pre"])
+        panel["sent_gap_divergence"] = panel["news_on_wsent"] - panel["gap_pre_z"] * 0.3
+
+    # fundamentals (as of the latest report_date < t)
+    fund = tables.get("fundamentals")
+    if fund is not None and len(fund):
+        fcols = [c for c in fund.columns if c not in ("ticker", "report_date")]
+        fd = fund.sort_values("report_date").rename(columns={"report_date": "date"})
+        left = panel.reset_index()[["date", "ticker"]].sort_values("date")
+        merged = pd.merge_asof(left, fd, on="date", by="ticker", allow_exact_matches=False)
+        merged = merged.set_index(["date", "ticker"])[fcols].add_prefix("f_")
+        panel = panel.join(merged)
+
+    # ---------------- targets ----------------
+    targ = {
+        "r_oc": np.log(c / o),
+        "r_cc": lr,
+        "r_gap": np.log(o / pc),
+        "r_fwd5": np.log(c.shift(-4) / o),
+        "r_fwd20": np.log(c.shift(-19) / o),
+        "open_px": o, "close_px": c, "prev_close": pc,
+        "high_px": h, "low_px": l,
+    }
+    if len(tables.get("options", [])):
+        targ["ivw_t"] = iv_today
+    tg = pd.concat({k: df.stack(future_stack=True) for k, df in targ.items()}, axis=1)
+    tg.index.names = ["date", "ticker"]
+    panel = panel.join(tg)
+    panel["sig_d"] = (panel["rv20"] / np.sqrt(252))
+    panel["y_dir"] = (panel["r_oc"] > 0).astype(np.int8)
+    panel["z_oc"] = (panel["r_oc"] / panel["sig_d"]).clip(-6, 6)
+    panel = panel.replace([np.inf, -np.inf], np.nan)
+    panel = panel[panel["rv20"].notna()].sort_index()
+    return add_ticker_traits(panel)
+
+
+# (input feature, prior strength). Prior strength = how many "units of evidence" the market-wide
+# estimate is worth. A ticker needs that much of its own history to move halfway to its own value.
+TRAITS = {
+    "news_on_wsent": 30.0,     # how much the stock keeps drifting after overnight news
+    "gap_pre_z": 150.0,        # does it extend (+) or fade (-) its opening gap
+    "ret_1d_z": 150.0,         # day-over-day continuation (+) or reversal (-)
+    "eps_surprise": 0.5,       # post-earnings drift per unit of EPS surprise
+}
+
+
+def add_ticker_traits(panel: pd.DataFrame) -> pd.DataFrame:
+    """Per-ticker behaviour, estimated point-in-time with shrinkage to the market-wide value.
+
+    trait_i(t) = (sum_{s<t} x_is*z_is + lam*b_mkt(t)) / (sum_{s<t} x_is^2 + lam)
+
+    i.e. a ridge-shrunk univariate regression slope of the ticker's own open-to-close return
+    (in vol units) on the feature, using only days before t. Interaction feature
+    tx_<f> = trait * f lets the model apply each ticker's own sensitivity.
+    """
+    z = panel["z_oc"]
+    known = z.notna()
+    Y = z.fillna(0.0)
+    tick = panel.index.get_level_values("ticker")
+    day = panel.index.get_level_values("date")
+    for f, lam in TRAITS.items():
+        if f not in panel:
+            continue
+        X = panel[f].fillna(0.0) * known
+        xy, xx = X * Y, X * X
+        cxy = xy.groupby(tick).cumsum() - xy           # strictly before today
+        cxx = xx.groupby(tick).cumsum() - xx
+        gxy = xy.groupby(day).sum().cumsum().shift(1)
+        gxx = xx.groupby(day).sum().cumsum().shift(1)
+        bm = (gxy / gxx.replace(0, np.nan)).reindex(day).fillna(0.0).values
+        # cumsum minus today = outcomes through t-1 close, all known at the t morning scan
+        tr = (cxy + lam * bm) / (cxx + lam)
+        panel[f"tr_{f}"] = tr.values
+        panel[f"tx_{f}"] = (tr * panel[f].fillna(0.0)).values
+        panel[f"n_{f}"] = cxx.values                    # evidence behind the trait
+    return panel
+
+
+TARGET_COLS = {"r_oc", "r_cc", "r_gap", "r_fwd5", "r_fwd20", "open_px", "close_px", "prev_close",
+               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc"}
+
+# Interpretable linear core. tx_* terms carry each ticker's own sensitivities.
+LINEAR_FEATURES = ["news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise",
+                   "ev_earnings", "ev_guidance", "ev_analyst", "news_prior_wsent", "news_5d_wsent",
+                   "tx_news_on_wsent", "tx_gap_pre_z", "tx_ret_1d_z", "tx_eps_surprise",
+                   "mkt_gap", "sector_gap_rel"]
+
+
+def feature_columns(panel: pd.DataFrame) -> list[str]:
+    return [c for c in panel.columns if c not in TARGET_COLS and not c.startswith(("_", "n_"))]
