@@ -9,6 +9,8 @@ uvicorn[standard]>=0.30
 pydantic>=2.7
 # optional: Sofo World export, price APIs, LLM news scoring
 psycopg[binary]>=3.2
+yfinance>=0.2.50
+boto3>=1.34
 anthropic>=0.70
 # dev
 pytest>=8

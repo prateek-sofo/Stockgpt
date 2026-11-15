@@ -102,15 +102,96 @@ def export(dsn: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None
     return df
 
 
+def _read_any(uri: str) -> pd.DataFrame:
+    """Read every parquet / csv / jsonl(.gz) under a local folder or s3://bucket/prefix."""
+    if uri.startswith("s3://"):
+        import boto3
+        bucket, _, prefix = uri[5:].partition("/")
+        s3 = boto3.client("s3")
+        keys = [o["Key"] for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+                for o in page.get("Contents", [])]
+        paths = [f"s3://{bucket}/{k}" for k in keys]
+    else:
+        from pathlib import Path
+        paths = [str(p) for p in sorted(Path(uri).rglob("*")) if p.is_file()]
+    frames = []
+    for path in paths:
+        if path.endswith(".parquet"):
+            frames.append(pd.read_parquet(path))
+        elif path.endswith((".csv", ".csv.gz")):
+            frames.append(pd.read_csv(path))
+        elif path.endswith((".jsonl", ".jsonl.gz", ".ndjson")):
+            frames.append(pd.read_json(path, lines=True))
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def export_from_dump(root: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Same result as export(), from table dumps under root/<table>/ (local or s3://).
+
+    Accepts either root/sofo_news/ (an already-joined export) or raw dumps of news_articles,
+    article_mentions, entity_identifiers and (optional) events.
+    """
+    root = root.rstrip("/")
+    done = _read_any(f"{root}/sofo_news")
+    if len(done):
+        df = done
+    else:
+        art = _read_any(f"{root}/news_articles")
+        men = _read_any(f"{root}/article_mentions")
+        ids = _read_any(f"{root}/entity_identifiers")
+        ev = _read_any(f"{root}/events")
+        ids = ids[ids["entity_type"] == "company"].sort_values("confidence", ascending=False)
+        tick = ids[ids["id_type"] == "ticker"].drop_duplicates("entity_id").set_index("entity_id")["id_value"].str.upper()
+        cik = ids[ids["id_type"] == "cik"].drop_duplicates("entity_id").set_index("entity_id")["id_value"].str.lstrip("0")
+        for c in ("published_at", "first_seen"):
+            art[c] = pd.to_datetime(art[c], utc=True, errors="coerce")
+        art = art[art["published_at"].notna() & (art["published_at"] >= pd.Timestamp(since, tz="UTC"))]
+        men = men[(men["entity_type"] == "company") & (men["is_subject"] | (men["salience"] >= MIN_SALIENCE))]
+        df = men.merge(art, on="article_id")
+        df["ticker"], df["cik"] = df["entity_id"].map(tick), df["entity_id"].map(cik)
+        late = df["first_seen"].clip(upper=df["published_at"] + pd.Timedelta(hours=6))
+        df["published_at"] = df["published_at"].where(late.isna(), pd.concat([df["published_at"], late], axis=1).max(axis=1))
+        df = df.rename(columns={"title": "headline", "snippet": "body"})
+        df["source"] = df.get("publisher_name", pd.Series(index=df.index)).fillna(df.get("publisher_domain"))
+        df["kind"] = "article"
+        if len(ev):
+            ev = ev[(ev["subject_type"] == "company") & ev["article_id"].isna()].copy()
+            ev["event_date"] = pd.to_datetime(ev["event_date"])
+            ev = ev[ev["event_date"] >= since]
+            next_morning = (ev["event_date"] + pd.Timedelta(days=1)).dt.tz_localize("America/New_York").dt.tz_convert("UTC")
+            ev["published_at"] = pd.concat([pd.to_datetime(ev["detected_at"], utc=True), next_morning], axis=1).max(axis=1)
+            ev["ticker"], ev["cik"] = ev["subject_id"].map(tick), ev["subject_id"].map(cik)
+            ev = ev.rename(columns={"title": "headline", "source_url": "url"})
+            ev["source"] = "sofo-event:" + ev["event_type"]
+            ev["kind"] = "event"
+            df = pd.concat([df, ev], ignore_index=True)
+    if sec_tickers is not None:
+        m = sec_tickers.drop_duplicates("cik").set_index(sec_tickers.drop_duplicates("cik")["cik"].astype(str))["ticker"]
+        df["ticker"] = df["ticker"].fillna(df["cik"].astype(str).map(m))
+    df = df.dropna(subset=["ticker", "published_at", "headline"])
+    df["published_at"] = pd.to_datetime(df["published_at"], utc=True)
+    key = df["cluster_id"].astype(str).where(df["cluster_id"].notna(), df["headline"]) if "cluster_id" in df else df["headline"]
+    df = df.assign(_key=key).sort_values("published_at").drop_duplicates(["_key", "ticker"]).drop(columns="_key")
+    return df
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", default="2018-01-01")
     ap.add_argument("--dsn", default=os.getenv("SOFO_DATABASE_URL"))
+    ap.add_argument("--dump", default=os.getenv("SOFO_NEWS_URI"),
+                    help="s3://bucket/prefix or folder holding table dumps (instead of a live DB)")
     a = ap.parse_args()
-    if not a.dsn:
-        raise SystemExit("set SOFO_DATABASE_URL (read-only role) or pass --dsn")
     sec = DATA_DIR / "sec_tickers.parquet"
-    out = export(a.dsn, a.since, pd.read_parquet(sec) if sec.exists() else None)
+    sect = pd.read_parquet(sec) if sec.exists() else None
+    if a.dump:
+        out = export_from_dump(a.dump, a.since, sect)
+    elif a.dsn:
+        out = export(a.dsn, a.since, sect)
+    else:
+        raise SystemExit("set SOFO_NEWS_URI (s3://... dump) or SOFO_DATABASE_URL (read-only role)")
+    keep = ["published_at", "ticker", "headline", "body", "source", "url", "kind"]
+    out = out[[c for c in keep if c in out]]
     out.to_parquet(DATA_DIR / "sofo_news.parquet", index=False)
     print(f"news rows: {len(out):,}  tickers: {out['ticker'].nunique():,}  "
           f"range: {out['published_at'].min()} -> {out['published_at'].max()}")

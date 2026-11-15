@@ -1,6 +1,10 @@
 """Daily price history for every listed stock.
 
-Providers (pick one; each needs its own API key, stored as an environment network secret or env var):
+Providers:
+
+* yahoo    default, open source, no key: yfinance over Yahoo Finance public daily bars.
+
+Keyed alternatives (stored as an environment network secret or env var):
 
 * polygon  POLYGON_API_KEY. Grouped daily bars: ONE request per trading day returns every US
            stock (split-adjusted OHLCV), so 10 years ~ 2,520 requests. Same vendor also sells
@@ -68,6 +72,39 @@ def polygon(start: str, end: str | None = None, tickers: set[str] | None = None,
     return out
 
 
+def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0,
+          cache_dir: Path | None = None) -> pd.DataFrame:
+    """Open-source route: yfinance (Apache-2.0) over Yahoo Finance's public daily bars.
+    Split- and dividend-adjusted OHLCV. Batched and paced; each batch is cached so a rerun resumes."""
+    import yfinance as yf
+    cache = cache_dir or DATA_DIR / "prices" / "yahoo"
+    cache.mkdir(parents=True, exist_ok=True)
+    syms = sorted(tickers)
+    frames = []
+    for i in range(0, len(syms), batch):
+        chunk = syms[i:i + batch]
+        f = cache / f"batch_{i // batch:04d}_{start}.parquet"
+        if f.exists():
+            frames.append(pd.read_parquet(f))
+            continue
+        ymap = {t.replace(".", "-"): t for t in chunk}            # BRK.B -> BRK-B on Yahoo
+        raw = yf.download(list(ymap), start=start, auto_adjust=True, progress=False, threads=False,
+                          group_by="column")
+        if raw is None or raw.empty:
+            pd.DataFrame().to_parquet(f)
+            continue
+        df = raw.stack(level=1, future_stack=True).reset_index()
+        df.columns = [str(c).lower() for c in df.columns]
+        df = df.rename(columns={"ticker": "ticker", "level_1": "ticker"})
+        df["ticker"] = df["ticker"].map(lambda y: ymap.get(y, y))
+        df = df.dropna(subset=["close"])[["date", "ticker", "open", "high", "low", "close", "volume"]]
+        df.to_parquet(f, index=False)
+        frames.append(df)
+        print(f"  batch {i // batch + 1}/{-(-len(syms) // batch)}: {df['ticker'].nunique()} tickers", flush=True)
+        time.sleep(pause_s)
+    return pd.concat([f for f in frames if len(f)], ignore_index=True)
+
+
 def tiingo(tickers: list[str], start: str, min_interval_s: float = 0.1) -> pd.DataFrame:
     key = os.environ["TIINGO_API_KEY"]
     frames = []
@@ -99,13 +136,15 @@ def from_files(folder: Path | None = None) -> pd.DataFrame:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--provider", choices=["polygon", "tiingo", "csv"], required=True)
+    ap.add_argument("--provider", choices=["yahoo", "polygon", "tiingo", "csv"], default="yahoo")
     ap.add_argument("--start", default="2016-01-01")
     ap.add_argument("--free-tier", action="store_true", help="polygon: 5 requests/minute")
     a = ap.parse_args()
     sec = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
     universe = set(sec["ticker"])
-    if a.provider == "polygon":
+    if a.provider == "yahoo":
+        df = yahoo(sorted(universe), a.start)
+    elif a.provider == "polygon":
         df = polygon(a.start, tickers=universe, min_interval_s=12.5 if a.free_tier else 0.0)
     elif a.provider == "tiingo":
         df = tiingo(sorted(universe), a.start)
