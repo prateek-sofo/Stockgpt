@@ -67,7 +67,7 @@ export function ProbRing({ p, dir, size = 64 }: { p: number; dir: "UP" | "DOWN";
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="num text-[13px] font-semibold">{(p * 100).toFixed(1)}</span>
-        <span className="text-[9px] text-ink-400">% {dir === "UP" ? "up" : "down"}</span>
+        <span className="text-[9px] text-ink-400">{dir === "UP" ? "beats mkt" : "lags mkt"}</span>
       </div>
     </div>
   );

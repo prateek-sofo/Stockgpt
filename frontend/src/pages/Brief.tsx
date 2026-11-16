@@ -6,7 +6,7 @@ import TradeCard from "../components/TradeCard";
 import { Card, ErrorBox, Loading, PageHeader, Pill, SentDot, Stat, Tabs } from "../components/ui";
 import { clearCache, useApi } from "../lib/api";
 import { pct, tone } from "../lib/format";
-import type { Brief as B } from "../lib/types";
+import type { Brief as B, World } from "../lib/types";
 
 export default function Brief() {
   const { data, error } = useApi<B>("brief");
@@ -98,6 +98,8 @@ export default function Brief() {
         </Card>
       </div>
 
+      {data.world && <WorldCard w={data.world} />}
+
       <Card className="mt-4" title="Sector tilt" right={<span className="text-[11.5px] text-ink-500">mean directional conviction · overnight news count</span>}>
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-6">
           {[...data.sectors].sort((a, b) => b.score - a.score).map((s) => {
@@ -116,5 +118,33 @@ export default function Brief() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function WorldCard({ w }: { w: World }) {
+  const z = (v: number | null) => (v == null ? "–" : `${v > 0 ? "+" : ""}${v.toFixed(1)}σ`);
+  const level = (v: number | null) => (v == null ? "ink" : v > 1.5 ? "down" : v > 0.5 ? "amber" : "up") as "ink" | "down" | "amber" | "up";
+  const items: { label: string; value: string; hint: string; tone?: string }[] = [
+    { label: "Political world risk", value: z(w.politics_risk), hint: "policy uncertainty + geopolitical risk, vs last 60 days" },
+    { label: "Policy uncertainty", value: z(w.policy_uncertainty_z), hint: "Baker-Bloom-Davis newspaper index" },
+    { label: "Geopolitical threats", value: z(w.geopolitical_threats_z), hint: "Caldara-Iacoviello newspaper index" },
+    { label: "VIX", value: w.vix == null ? "–" : w.vix.toFixed(1), hint: `day change ${pct(w.vix_chg, 1)}` },
+    { label: "10y yield, 5d", value: w.dgs10_chg5 == null ? "–" : `${w.dgs10_chg5 > 0 ? "+" : ""}${(w.dgs10_chg5 * 100).toFixed(0)} bp`, hint: `curve 10y-2y ${w.curve_10_2?.toFixed(2) ?? "–"}` },
+    { label: "Credit spread", value: w.hy_spread == null ? "–" : `${w.hy_spread.toFixed(2)}%`, hint: `5d ${w.hy_spread_chg5 == null ? "–" : (w.hy_spread_chg5 * 100).toFixed(0) + " bp"}` },
+    { label: "S&P 500", value: pct(w.spx_ret1, 2), hint: "yesterday", tone: tone(w.spx_ret1) },
+    { label: "Dollar / Oil / Gold", value: `${pct(w.dxy_ret1, 1)} · ${pct(w.oil_ret1, 1)} · ${pct(w.gold_ret1, 1)}`, hint: "yesterday" },
+  ];
+  return (
+    <Card className="mt-4" title={<span className="flex items-center gap-2">Political world & macro <Pill color={level(w.politics_risk)}>{w.politics_risk == null ? "no data" : w.politics_risk > 1.5 ? "elevated" : w.politics_risk > 0.5 ? "watch" : "calm"}</Pill></span>}
+      right={<span className="text-[11px] text-ink-500">context for sizing; in backtests it did not predict next-day stock moves</span>}>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+        {items.map((it) => (
+          <div key={it.label} className="rounded-xl border border-ink-800 bg-ink-950/40 p-3" title={it.hint}>
+            <div className="label">{it.label}</div>
+            <div className={clsx("num mt-1 text-[15px] font-semibold", it.tone)}>{it.value}</div>
+            <div className="mt-0.5 truncate text-[10.5px] text-ink-500">{it.hint}</div>
+          </div>))}
+      </div>
+    </Card>
   );
 }

@@ -18,7 +18,16 @@ export interface Straddle {
   edge_ratio: number | null; signal: string; iv: number; premium: number; headlines: Headline[];
 }
 
+export interface World {
+  politics_risk: number | null; policy_uncertainty_z: number | null; geopolitical_risk_z: number | null;
+  geopolitical_threats_z: number | null; vix: number | null; vix_chg: number | null; curve_10_2: number | null;
+  hy_spread: number | null; hy_spread_chg5: number | null; dgs10_chg5: number | null; spx_ret1: number | null;
+  dxy_ret1: number | null; oil_ret1: number | null; gold_ret1: number | null;
+}
+export interface AblationRow { target?: string; step: string; ic?: number; ic_t?: number; spread_bps?: number; hit_top?: number; added?: number; note?: string; top_new?: string[] }
+export interface Ablation { split: string; results: AblationRow[]; market_model?: { features: number; gbm: { hit: number; base_up_rate: number; sharpe: number; days: number }; ridge: { hit: number; sharpe: number } } }
 export interface Brief {
+  world?: World;
   scan_date: string; generated_for: string; equity: number; universe_size: number; scanned: number;
   market: { premarket_gap: number; news_items: number; regime_vol: number; cal_slope: number };
   options: Ticket[]; stocks: Ticket[]; straddles: Straddle[];

@@ -8,7 +8,7 @@ import {
 import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, Stat, Tabs } from "../components/ui";
 import { useApi } from "../lib/api";
 import { compact, MONTHS, num, pct, tone, usd } from "../lib/format";
-import type { Backtest as BT } from "../lib/types";
+import type { Ablation, Backtest as BT } from "../lib/types";
 
 const STRATS = {
   stock_daytrade: { col: "stock", name: "Shares day trade", color: "#4cc3ff", desc: "Long/short at the open, flat at the close. 2× gross intraday leverage across up to 6 names." },
@@ -161,6 +161,8 @@ export default function Backtest() {
         </Card>
       </div>
 
+      <AblationCard />
+
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card title="Per-ticker model skill" right={<span className="text-[11px] text-ink-500">out-of-sample IC by ticker</span>}>
           <div className="h-[150px]">
@@ -238,5 +240,45 @@ function MonthGrid({ m }: { m: { year: number; month: number; ret: number }[] })
         })}</tbody>
       </table>
     </div>
+  );
+}
+
+function AblationCard() {
+  const { data } = useApi<Ablation>("ablation");
+  if (!data) return null;
+  const rows = data.results.filter((r) => r.ic != null);
+  const best = Math.max(...rows.map((r) => r.spread_bps ?? 0));
+  const mm = data.market_model;
+  return (
+    <Card className="mt-4" title="What actually predicts next-session direction"
+      right={<span className="text-[11px] text-ink-500">holdout from {data.split}; groups added one at a time</span>}>
+      <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+        <table className="w-full text-[12.5px]">
+          <thead><tr className="text-left text-ink-500">
+            <th className="py-1.5 font-medium">Target</th><th className="font-medium">Feature group added</th>
+            <th className="font-medium text-right">IC</th><th className="font-medium text-right">t-stat</th>
+            <th className="font-medium text-right">Top-bottom decile</th><th className="font-medium text-right">Top decile up</th>
+            <th className="pl-4 font-medium">Strongest new features</th></tr></thead>
+          <tbody>{data.results.map((r, i) => (
+            <tr key={i} className="border-t border-ink-800/70">
+              <td className="py-1.5 text-ink-400">{r.target === "z_x" ? "vs market" : "raw"}</td>
+              <td className="text-ink-200">{r.step.replace("+ ", "")}</td>
+              {r.ic == null ? <td colSpan={5} className="text-ink-500">{r.note}</td> : (<>
+                <td className={clsx("num text-right", tone(r.ic))}>{num(r.ic, 4)}</td>
+                <td className="num text-right">{num(r.ic_t, 1)}</td>
+                <td className={clsx("num text-right", r.spread_bps === best && "font-semibold text-accent")}>{num(r.spread_bps, 1)} bps</td>
+                <td className="num text-right">{pct(r.hit_top, 1, false)}</td>
+                <td className="num truncate pl-4 text-[11px] text-ink-500">{(r.top_new ?? []).join(", ")}</td></>)}
+            </tr>))}</tbody>
+        </table>
+        {mm && (
+          <div className="rounded-xl border border-ink-800 bg-ink-950/40 p-4 text-[12.5px]">
+            <div className="label mb-2">Market direction from the political world</div>
+            <div className="num text-[22px] font-semibold">{pct(mm.gbm.hit, 1, false)}</div>
+            <div className="text-ink-400">days called right, vs {pct(1 - mm.gbm.base_up_rate, 1, false)} for "always down" and {pct(mm.gbm.base_up_rate, 1, false)} for "always up", over {mm.gbm.days} sessions. Sharpe {num(mm.gbm.sharpe, 2)}.</div>
+            <div className="mt-2 text-ink-500">Policy uncertainty, geopolitical risk, rates, credit and volatility did not forecast the next session's market direction better than chance, so they are shown as context, not used as stock signals.</div>
+          </div>)}
+      </div>
+    </Card>
   );
 }
