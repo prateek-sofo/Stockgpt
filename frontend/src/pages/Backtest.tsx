@@ -8,10 +8,11 @@ import {
 import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, Stat, Tabs } from "../components/ui";
 import { useApi } from "../lib/api";
 import { compact, MONTHS, num, pct, tone, usd } from "../lib/format";
-import type { Ablation, Backtest as BT } from "../lib/types";
+import type { Ablation, Backtest as BT, Research } from "../lib/types";
 
 const STRATS = {
-  stock_daytrade: { col: "stock", name: "Shares day trade", color: "#4cc3ff", desc: "Long/short at the open, flat at the close. 2× gross intraday leverage across up to 6 names." },
+  swing_5d: { col: "swing", name: "Swing 5-day long/short", color: "#2ee6a6", desc: "Each day buy the 25 strongest and short the 25 weakest liquid names by the 5-session model; hold 5 sessions. 1× long, 1× short." },
+  stock_daytrade: { col: "stock", name: "Day-trade long/short", color: "#4cc3ff", desc: "Each day long the 25 strongest and short the 25 weakest by the 1-day model, open to close. 1× long, 1× short." },
   options_daytrade: { col: "options", name: "Options day trade", color: "#8b7bff", desc: "Weekly calls/puts bought at the open, sold at the close. Quarter-Kelly, ≤2% premium per trade, ≤8% per day." },
   earnings_straddle: { col: "straddle", name: "Earnings straddle", color: "#ffb547", desc: "Buy the straddle at the close before a report when the ticker's own history of moves beats the implied move by 15%+." },
 } as const;
@@ -20,20 +21,21 @@ type K = keyof typeof STRATS;
 export default function Backtest() {
   const { data, error } = useApi<BT>("backtest");
   const [k, setK] = useState<K>("stock_daytrade");
+  const { data: research } = useApi<Research>("research");
   const [log, setLog] = useState(true);
   const curve = useMemo(() => {
     if (!data) return [];
     let peak = 0;
     const col = STRATS[k].col;
     return data.curve.map((r) => {
-      const v = r[col as "stock"];
+      const v = (r[col as "stock"] ?? data.risk.starting_capital) as number;
       peak = Math.max(peak, v);
       return { ...r, v, dd: v / peak - 1 };
     });
   }, [data, k]);
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
-  const s = data.strategies[k];
+  const s = data.strategies[k] ?? data.strategies.stock_daytrade;
   const sig = data.signal;
   const trades = data.trades.filter((t) => t.strategy === k).slice(-60).reverse();
   return (
@@ -61,6 +63,10 @@ export default function Backtest() {
         <Stat label="Win rate" value={pct(s.win_rate, 1, false)} sub={`${s.trades ?? 0} trades`} />
         <Stat label="Avg win / loss" value={<span className="text-[17px]"><span className="text-up">{pct(s.avg_win, 1)}</span> <span className="text-ink-500">/</span> <span className="text-down">{pct(s.avg_loss, 1)}</span></span>} sub={k === "stock_daytrade" ? "per position" : "on premium"} />
         <Stat label="Profit factor" value={num(s.profit_factor, 2)} valueClass={s.profit_factor! >= 1 ? "text-up" : "text-down"} />
+        {s.robustness?.dsr != null && <Stat label="Deflated Sharpe" value={pct(s.robustness.dsr, 0, false)}
+          valueClass={s.robustness.dsr > 0.95 ? "text-up" : s.robustness.dsr > 0.5 ? "text-amber" : "text-down"}
+          sub={`P(real edge) after ${s.robustness.trials} trials`}
+          hint="Bailey & López de Prado: probability the true Sharpe is above zero after correcting for having tried several variants and for fat tails. Above 95% is the usual bar." />}
         <Stat label="Volatility" value={pct(s.vol_annual, 0, false)} sub={`best ${pct(s.best_day, 1)} · worst ${pct(s.worst_day, 1)}`} />
       </div>
 
@@ -102,7 +108,8 @@ export default function Backtest() {
                 <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={80} />
                 <YAxis scale="log" domain={["auto", "auto"]} tickFormatter={(v) => compact(v, "$")} tickLine={false} axisLine={false} width={52} />
                 <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [usd(v), n]} />
-                <Line dataKey="stock" stroke="#4cc3ff" dot={false} strokeWidth={1.6} name="Shares" />
+                <Line dataKey="swing" stroke="#2ee6a6" dot={false} strokeWidth={1.6} name="Swing 5d" />
+                <Line dataKey="stock" stroke="#4cc3ff" dot={false} strokeWidth={1.6} name="Day L/S" />
                 <Line dataKey="options" stroke="#8b7bff" dot={false} strokeWidth={1.6} name="Options" />
                 <Line dataKey="straddle" stroke="#ffb547" dot={false} strokeWidth={1.6} name="Straddles" />
               </LineChart>
@@ -161,6 +168,7 @@ export default function Backtest() {
         </Card>
       </div>
 
+      {research && <ResearchCard r={research} />}
       <AblationCard />
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -279,6 +287,35 @@ function AblationCard() {
             <div className="mt-2 text-ink-500">Policy uncertainty, geopolitical risk, rates, credit and volatility did not forecast the next session's market direction better than chance, so they are shown as context, not used as stock signals.</div>
           </div>)}
       </div>
+    </Card>
+  );
+}
+
+function ResearchCard({ r }: { r: Research }) {
+  const best = Math.max(...r.variants.map((v) => v.sharpe));
+  return (
+    <Card className="mt-4" title="Research holdout: which model design holds up"
+      right={<span className="text-[11px] text-ink-500">trained before {r.split} with a {r.purge_sessions}-session purge · {r.book} · {r.cost_bps_round_trip} bps round trip · see docs/RESEARCH.md</span>}>
+      <table className="w-full text-[12.5px]">
+        <thead><tr className="text-left text-ink-500">
+          <th className="py-1.5 font-medium">Variant</th><th className="font-medium text-right">Hold</th><th className="font-medium text-right">IC</th>
+          <th className="font-medium text-right" title="t > 3 is the bar suggested by Harvey, Liu and Zhu (2016)">t-stat</th>
+          <th className="font-medium text-right">Net bps/day</th><th className="font-medium text-right">Net / yr</th><th className="font-medium text-right">Sharpe</th>
+          <th className="font-medium text-right" title="share of longs that beat the market / shorts that lagged it">Hit long / short</th>
+          <th className="pl-4 font-medium">Net bps/day by year</th></tr></thead>
+        <tbody>{r.variants.map((v) => (
+          <tr key={v.variant} className="border-t border-ink-800/70" title={v.note}>
+            <td className="py-1.5 text-ink-200">{v.variant}</td>
+            <td className="num text-right text-ink-400">{v.hold_days}d</td>
+            <td className="num text-right">{num(v.ic, 4)}</td>
+            <td className={clsx("num text-right", v.ic_t >= 3 ? "text-up" : "text-ink-300")}>{num(v.ic_t, 1)}</td>
+            <td className={clsx("num text-right", tone(v.net_bps_day))}>{num(v.net_bps_day, 1)}</td>
+            <td className={clsx("num text-right", tone(v.net_ann))}>{pct(v.net_ann, 0)}</td>
+            <td className={clsx("num text-right", v.sharpe === best && "font-semibold text-accent")}>{num(v.sharpe, 2)}</td>
+            <td className="num text-right">{pct(v.hit_long, 1, false)} / {pct(v.hit_short, 1, false)}</td>
+            <td className="num pl-4 text-[11.5px]">{Object.entries(v.by_year).map(([y, b]) => <span key={y} className={clsx("mr-3", tone(b))}>{y}: {num(b, 1)}</span>)}</td>
+          </tr>))}</tbody>
+      </table>
     </Card>
   );
 }

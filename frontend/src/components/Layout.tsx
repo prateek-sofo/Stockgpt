@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Activity, BarChart3, Database, Gauge, Layers, LineChart, Search, Sunrise, TrendingUp } from "lucide-react";
+import { Activity, BarChart3, Database, Gauge, Layers, LineChart, Search, Sunrise, Target, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useApi } from "../lib/api";
@@ -7,6 +7,7 @@ import type { Meta } from "../lib/types";
 
 const NAV = [
   { to: "/", label: "Morning Brief", icon: Sunrise },
+  { to: "/accuracy", label: "Model Accuracy", icon: Target },
   { to: "/backtest", label: "Backtest Lab", icon: BarChart3 },
   { to: "/planner", label: "Growth Planner", icon: Gauge },
   { to: "/universe", label: "Universe", icon: Layers },

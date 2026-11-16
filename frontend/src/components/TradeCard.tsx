@@ -88,7 +88,7 @@ export default function TradeCard({ t, rank }: { t: Ticket; rank: number }) {
       <div className="mt-4 flex flex-wrap gap-1.5">
         {traits.map(([k, m]) => {
           const L = TRAIT_LABEL[k];
-          const rel = m.effective - (m.market_beta * 0.7);
+          const rel = m.effective - m.market_beta;
           return (
             <span key={k} title={`${L?.name}: this ticker ${m.effective >= 0 ? L?.pos : L?.neg}. Evidence ${m.evidence.toFixed(0)}.`}
               className="chip bg-ink-800 text-ink-300 ring-1 ring-ink-700">

@@ -35,7 +35,7 @@ from ..features import LINEAR_FEATURES, TRAITS
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-GBM_WEIGHT = 0.3
+GBM_WEIGHT = 1.0      # research holdout: trees alone beat the ridge blend; ridge kept for per-ticker coefficients
 
 
 @dataclass
@@ -47,6 +47,8 @@ class HierarchicalModel:
     lin_sd: np.ndarray | None = None
     gbm: lgb.LGBMRegressor | None = None
     mag: lgb.LGBMRegressor | None = None
+    gbm5: lgb.LGBMRegressor | None = None
+    gbms: list | None = None
     cal_slope: float = 1.0          # fitted on earlier out-of-sample predictions
 
     # ------------------------------------------------------------------ fit
@@ -67,9 +69,18 @@ class HierarchicalModel:
         X = df[self.features].astype(np.float32)
         p = dict(SETTINGS.model.gbm_params)
         cons = {**p, "num_leaves": 15, "min_child_samples": 1000, "n_estimators": 400, "learning_rate": 0.02}
-        self.gbm = lgb.LGBMRegressor(objective="huber", alpha=1.5, **cons).fit(X, y)
+        # seed ensemble: the research holdout showed averaging models with different seeds lifts Sharpe
+        self.gbms = [lgb.LGBMRegressor(objective="huber", alpha=1.5, **{**cons, "random_state": seed}).fit(X, y)
+                     for seed in range(SETTINGS.model.gbm_seeds)]
+        self.gbm = self.gbms[0]
         self.mag = lgb.LGBMRegressor(objective="regression", **{**p, "n_estimators": 200}).fit(
             X, np.abs(y))
+        # 5-session model (open t -> close t+4, market-relative): slower signal, a fifth of the turnover
+        self.gbm5 = None
+        if "z5_x" in df:
+            ok = df["z5_x"].notna().values
+            if ok.sum() > 10_000:
+                self.gbm5 = lgb.LGBMRegressor(objective="huber", alpha=1.5, **cons).fit(X[ok], df["z5_x"].values[ok])
         return self
 
     def calibrate(self, mu: np.ndarray, z: np.ndarray) -> float:
@@ -86,14 +97,18 @@ class HierarchicalModel:
         XL = (df[self.linear_features].fillna(0.0).values - self.lin_mu) / self.lin_sd
         mu_lin = self.ridge.predict(XL)
         X = df[self.features].astype(np.float32)
-        mu_gbm = self.gbm.predict(X)
+        models = getattr(self, "gbms", None) or [self.gbm]
+        mu_gbm = np.mean([m.predict(X) for m in models], axis=0)
         mu = (1 - GBM_WEIGHT) * mu_lin + GBM_WEIGHT * mu_gbm
         absz = np.clip(self.mag.predict(X), 0.3, 8)
         s = absz * np.sqrt(np.pi / 2)
         p_raw = norm.cdf(mu / s)
         p_cal = norm.cdf(self.cal_slope * mu / s)
-        return pd.DataFrame({"mu": mu, "mu_lin": mu_lin, "mu_gbm": mu_gbm, "p_up": p_raw,
-                             "p_cal": np.clip(p_cal, 0.02, 0.98), "exp_absz": absz}, index=df.index)
+        out = pd.DataFrame({"mu": mu, "mu_lin": mu_lin, "mu_gbm": mu_gbm, "p_up": p_raw,
+                            "p_cal": np.clip(p_cal, 0.02, 0.98), "exp_absz": absz}, index=df.index)
+        if getattr(self, "gbm5", None) is not None:
+            out["mu5"] = self.gbm5.predict(X)
+        return out
 
     # ------------------------------------------------------------ explain
     def coefficients(self) -> dict[str, float]:
@@ -118,6 +133,6 @@ class HierarchicalModel:
             trait = float(row.get(f"tr_{f}", np.nan))
             beta, gamma = coef.get(f, 0.0), coef.get(f"tx_{f}", 0.0)
             out[f] = dict(trait=trait, market_beta=beta, gamma=gamma,
-                          effective=(1 - GBM_WEIGHT) * (beta + gamma * (trait if np.isfinite(trait) else 0.0)),
+                          effective=(beta + gamma * (trait if np.isfinite(trait) else 0.0)),
                           evidence=float(row.get(f"n_{f}", 0.0)))
         return out

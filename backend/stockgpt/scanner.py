@@ -29,7 +29,7 @@ def next_friday(d: pd.Timestamp, min_days: int = 4) -> pd.Timestamp:
 
 def explain(model: HierarchicalModel, row: pd.Series, top: int = 4) -> list[dict]:
     x = np.array([row.get(f, 0.0) if pd.notna(row.get(f, np.nan)) else 0.0 for f in model.linear_features])
-    contrib = (1 - GBM_WEIGHT) * model.ridge.coef_ * (x - model.lin_mu) / model.lin_sd
+    contrib = model.ridge.coef_ * (x - model.lin_mu) / model.lin_sd
     idx = np.argsort(-np.abs(contrib))[:top]
     return [dict(factor=LABELS.get(model.linear_features[i], model.linear_features[i]),
                  key=model.linear_features[i], value=float(x[i]), contribution=float(contrib[i]))
@@ -137,7 +137,12 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
     movers = [dict(ticker=tk, name=meta.at[tk, "name"], gap=float(r["gap_pre"]), gap_z=float(r["gap_pre_z"]),
                    news=int(r["news_on_count"]), sentiment=float(r["news_on_wsent"]), prob_up=float(r["p_cal"]))
               for (_, tk), r in movers.iterrows()]
-    first = today.iloc[0]
+    from .config import DATA_DIR
+    mp = DATA_DIR / "macro_raw.parquet"
+    first = {}
+    if mp.exists():
+        from .sources.macro import daily_features
+        first = daily_features(pd.read_parquet(mp), pd.DatetimeIndex([scan_date])).iloc[0].to_dict()
     def g(c):
         v = first.get(c, np.nan)
         return float(v) if pd.notna(v) else None
