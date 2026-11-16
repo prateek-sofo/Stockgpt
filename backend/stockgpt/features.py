@@ -141,8 +141,9 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     feats["event_premium"] = ivw_prev / iv          # >1 = event priced into the front week
     feats["atm_spread"] = spread
 
-    panel = pd.concat({k: df.stack(future_stack=True) for k, df in feats.items()}, axis=1)
+    panel = pd.concat({k: df.stack(future_stack=True).astype(np.float32) for k, df in feats.items()}, axis=1)
     panel.index.names = ["date", "ticker"]
+    del feats
 
     # earnings timing
     e = tables.get("earnings")
@@ -229,25 +230,32 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
 
     # ---------------- competitors and peers ----------------
     from .peers import peer_features
-    panel = panel.join(peer_features(dates, list(gap.columns), lr, panel, tables))
+    pf = peer_features(dates, list(gap.columns), lr, panel, tables)
+    for col in pf.columns:
+        panel[col] = pf[col].values
+    del pf
 
     # ---------------- macro and political world ----------------
     macro_path = DATA_DIR / "macro_raw.parquet"
     if macro_path.exists():
         from .sources.macro import SECTOR_ETF, daily_features
         mf = daily_features(pd.read_parquet(macro_path), dates).astype(np.float32)
-        mf.index.name = "date"
-        panel = panel.join(mf, on="date")
-        # the company's own sector ETF move yesterday
+        day_pos = dates.get_indexer(panel.index.get_level_values("date"))
+        # a focused set: political world, rates/credit, volatility, broad market, dollar, oil, gold
+        for col in MACRO_KEEP:
+            if col in mf:
+                panel[col] = mf[col].values[day_pos]
+        # the company's own sector ETF move yesterday (one column instead of eleven)
         sect = tables["tickers"].set_index("ticker")["sector"]
         etf = panel.index.get_level_values("ticker").map(sect).map(SECTOR_ETF)
         sec_ret = np.full(len(panel), np.nan, dtype=np.float32)
         for name in set(SECTOR_ETF.values()):
             col = f"mkt_{name}_ret1"
-            if col in panel:
-                m = (etf == name)
-                sec_ret[m] = panel.loc[m, col].values
+            if col in mf:
+                m = np.asarray(etf == name)
+                sec_ret[m] = mf[col].values[day_pos[m]]
         panel["sector_etf_ret1"] = sec_ret
+        del mf
 
     # ---------------- targets ----------------
     targ = {
@@ -283,6 +291,11 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
 
 # (input feature, prior strength). Prior strength = how many "units of evidence" the market-wide
 # estimate is worth. A ticker needs that much of its own history to move halfway to its own value.
+MACRO_KEEP = ["world_politics_risk", "fred_epu_z", "fred_emv_epu_z", "politics_gpr_z", "politics_gpr_threats_z",
+              "world_economy_attn", "world_politics_attn", "world_economy_tone", "world_politics_tone",
+              "fred_dgs10_chg5", "fred_curve_10_2", "fred_hy_spread", "fred_hy_spread_chg5", "fred_breakeven10_chg5",
+              "mkt_vix", "mkt_vix_chg", "mkt_spx_ret1", "mkt_spx_ret5", "mkt_dxy_ret1", "mkt_oil_ret1", "mkt_gold_ret1"]
+
 TRAITS = {
     "news_on_wsent": 30.0,     # how much the stock keeps drifting after overnight news
     "gap_pre_z": 150.0,        # does it extend (+) or fade (-) its opening gap
