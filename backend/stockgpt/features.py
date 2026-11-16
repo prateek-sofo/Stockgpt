@@ -99,6 +99,31 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     feats["dist_20d_high"] = (pc / h.rolling(20).max().shift(1) - 1) / sig20
     feats["dist_20d_low"] = (pc / l.rolling(20).min().shift(1) - 1) / sig20
     feats["oc_autocorr_prev"] = np.log(c / o).shift(1) / sig20      # yesterday's intraday move
+    # ---- signals from the published literature (see docs/RESEARCH.md); all use data through t-1 ----
+    oc, on = np.log(c / o), np.log(o / pc)
+    for w in (5, 20, 60):          # Lou-Polk-Skouras "tug of war": intraday and overnight returns each persist
+        feats[f"intra_{w}"] = oc.rolling(w, min_periods=w // 2).mean().shift(1) / sig20
+        feats[f"over_{w}"] = on.rolling(w, min_periods=w // 2).mean().shift(1) / sig20
+    feats["mom_12_1"] = np.log(c.shift(22) / c.shift(253))                 # Jegadeesh-Titman momentum
+    feats["mom_6_1"] = np.log(c.shift(22) / c.shift(127))
+    feats["rev_1m"] = np.log(pc / c.shift(22))                             # short-term reversal
+    feats["max_20"] = lr.rolling(20).max().shift(1) / sig20                # Bali et al. MAX (lottery) effect
+    feats["min_20"] = lr.rolling(20).min().shift(1) / sig20
+    feats["dist_52w_high"] = pc / h.rolling(252, min_periods=120).max().shift(1) - 1   # George-Hwang
+    feats["amihud_20"] = np.log((lr.abs() / dv.replace(0, np.nan)).rolling(20, min_periods=10).mean().shift(1) * 1e9)
+    feats["turn_5_60"] = dv.rolling(5).mean().shift(1) / dv.rolling(60, min_periods=20).mean().shift(1)
+    feats["vol_5_60"] = lr.rolling(5).std().shift(1) / lr.rolling(60, min_periods=20).std().shift(1)
+    feats["skew_60"] = lr.rolling(60, min_periods=30).skew().shift(1)
+    feats["corr_pv_20"] = lr.rolling(20).corr(np.log(v.replace(0, np.nan)).diff()).shift(1)   # Qlib Alpha158 CORD
+    lo20, hi20 = l.rolling(20).min().shift(1), h.rolling(20).max().shift(1)
+    feats["rsv_20"] = (pc - lo20) / (hi20 - lo20).replace(0, np.nan)        # Qlib Alpha158 RSV
+    feats["klen_5"] = ((h - l) / o).rolling(5).mean().shift(1) / sig20
+    mkt_lr = lr.mean(axis=1)
+    beta = lr.rolling(60, min_periods=30).cov(mkt_lr).div(mkt_lr.rolling(60, min_periods=30).var(), axis=0)
+    feats["beta_60"] = beta.shift(1)                                       # Frazzini-Pedersen betting against beta
+    resid_var = (lr.rolling(60, min_periods=30).var() - beta.pow(2).mul(mkt_lr.rolling(60, min_periods=30).var(), axis=0))
+    feats["ivol_60"] = np.sqrt(resid_var.clip(lower=0)).shift(1) * np.sqrt(252)   # Ang et al. idiosyncratic vol
+    del oc, on, beta, resid_var, lo20, hi20
     # market / sector context
     mkt_gap = gap.mean(axis=1)
     feats["mkt_gap"] = pd.DataFrame(np.repeat(mkt_gap.values[:, None], gap.shape[1], 1),
@@ -235,28 +260,6 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
         panel[col] = pf[col].values
     del pf
 
-    # ---------------- macro and political world ----------------
-    macro_path = DATA_DIR / "macro_raw.parquet"
-    if macro_path.exists():
-        from .sources.macro import SECTOR_ETF, daily_features
-        mf = daily_features(pd.read_parquet(macro_path), dates).astype(np.float32)
-        day_pos = dates.get_indexer(panel.index.get_level_values("date"))
-        # a focused set: political world, rates/credit, volatility, broad market, dollar, oil, gold
-        for col in MACRO_KEEP:
-            if col in mf:
-                panel[col] = mf[col].values[day_pos]
-        # the company's own sector ETF move yesterday (one column instead of eleven)
-        sect = tables["tickers"].set_index("ticker")["sector"]
-        etf = panel.index.get_level_values("ticker").map(sect).map(SECTOR_ETF)
-        sec_ret = np.full(len(panel), np.nan, dtype=np.float32)
-        for name in set(SECTOR_ETF.values()):
-            col = f"mkt_{name}_ret1"
-            if col in mf:
-                m = np.asarray(etf == name)
-                sec_ret[m] = mf[col].values[day_pos[m]]
-        panel["sector_etf_ret1"] = sec_ret
-        del mf
-
     # ---------------- targets ----------------
     targ = {
         "r_oc": np.log(c / o),
@@ -276,6 +279,13 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     panel["z_oc"] = (panel["r_oc"] / panel["sig_d"]).clip(-6, 6)
     # stock-relative target: the day's cross-sectional average removed (what a market-neutral book earns)
     panel["z_x"] = panel["z_oc"] - panel.groupby(level="date")["z_oc"].transform("mean")
+    # 5-session horizon (open t -> close t+4), in vol units, market-relative. Longer holds cut trading costs.
+    z5 = (panel["r_fwd5"] / (panel["sig_d"] * np.sqrt(5))).clip(-6, 6)
+    panel["z5_x"] = z5 - z5.groupby(level="date").transform("mean")
+    # cross-sectional ranks (Gu-Kelly-Xiu): each day, where does the stock stand among all stocks, in [-0.5, 0.5]
+    for col in RANK_FEATURES:
+        if col in panel:
+            panel[col] = (panel[col].groupby(level="date").rank(pct=True) - 0.5).astype(np.float32)
     panel = panel.replace([np.inf, -np.inf], np.nan)
     panel = panel[panel["rv20"].notna()].sort_index()
     if iv_source == "estimated" and "hist_earn_move" in panel:
@@ -293,6 +303,11 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
 
 # (input feature, prior strength). Prior strength = how many "units of evidence" the market-wide
 # estimate is worth. A ticker needs that much of its own history to move halfway to its own value.
+RESEARCH_FEATURES = ["intra_5", "intra_20", "intra_60", "over_5", "over_20", "over_60", "mom_12_1", "mom_6_1",
+                     "rev_1m", "max_20", "min_20", "dist_52w_high", "amihud_20", "turn_5_60", "vol_5_60", "skew_60",
+                     "corr_pv_20", "rsv_20", "klen_5", "beta_60", "ivol_60"]
+RANK_FEATURES = RESEARCH_FEATURES + ["log_mcap"]
+
 MACRO_KEEP = ["world_politics_risk", "fred_epu_z", "fred_emv_epu_z", "politics_gpr_z", "politics_gpr_threats_z",
               "world_economy_attn", "world_politics_attn", "world_economy_tone", "world_politics_tone",
               "fred_dgs10_chg5", "fred_curve_10_2", "fred_hy_spread", "fred_hy_spread_chg5", "fred_breakeven10_chg5",
@@ -343,7 +358,7 @@ def add_ticker_traits(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 TARGET_COLS = {"r_oc", "r_cc", "r_gap", "r_fwd5", "r_fwd20", "open_px", "close_px", "prev_close",
-               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc", "z_x"}
+               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc", "z_x", "z5_x"}
 
 # Interpretable linear core. tx_* terms carry each ticker's own sensitivities.
 LINEAR_FEATURES = ["peer_ind_news", "peer_comp_news", "peer_corr_news", "peer_ind_earn_surp", "peer_comp_earn_surp", "peer_corr_earn_surp", "peer_ind_earn_react", "supply_news", "tx_peer_ind_earn_surp", "news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise", "ev_earnings", "ev_guidance", "ev_analyst", "news_prior_wsent", "news_5d_wsent", "tx_news_on_wsent", "tx_gap_pre_z", "tx_ret_1d_z", "tx_eps_surprise", "mkt_gap", "sector_gap_rel"]

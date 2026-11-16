@@ -137,7 +137,12 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
     movers = [dict(ticker=tk, name=meta.at[tk, "name"], gap=float(r["gap_pre"]), gap_z=float(r["gap_pre_z"]),
                    news=int(r["news_on_count"]), sentiment=float(r["news_on_wsent"]), prob_up=float(r["p_cal"]))
               for (_, tk), r in movers.iterrows()]
-    first = today.iloc[0]
+    from .config import DATA_DIR
+    mp = DATA_DIR / "macro_raw.parquet"
+    first = {}
+    if mp.exists():
+        from .sources.macro import daily_features
+        first = daily_features(pd.read_parquet(mp), pd.DatetimeIndex([scan_date])).iloc[0].to_dict()
     def g(c):
         v = first.get(c, np.nan)
         return float(v) if pd.notna(v) else None

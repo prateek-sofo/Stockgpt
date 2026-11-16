@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 
 from . import longterm
-from .backtest import (build_signals, calibration, deciles, information_coefficient, monte_carlo,
+from .accuracy import per_ticker as accuracy_per_ticker, summary as accuracy_summary
+from .backtest import (deflated_sharpe, build_signals, calibration, deciles, information_coefficient, monte_carlo,
                        monthly_returns, simulate, stats, walk_forward)
 from .config import ARTIFACT_DIR, SETTINGS
 from .data.loader import load_all
@@ -104,7 +105,7 @@ def _row_stats(row) -> dict:
                 hist_earn_move=_num(row, "hist_earn_move"))
 
 
-def ticker_profiles(panel, sig, trades, tables, model):
+def ticker_profiles(panel, sig, trades, tables, model, acc_detail=None):
     meta = tables["tickers"].set_index("ticker")
     news = score_news(tables["news"])
     dates = panel.index.get_level_values("date").unique().sort_values()
@@ -158,7 +159,7 @@ def ticker_profiles(panel, sig, trades, tables, model):
             ticker=tk, name=meta.at[tk, "name"], sector=meta.at[tk, "sector"],
             market_cap=float(meta.at[tk, "market_cap"]) if "market_cap" in meta else None,
             liquid=bool(lm.get(tk, False)), prices=prices, news=nitems, traits=trait_hist,
-            earnings=earn, performance=perf,
+            earnings=earn, performance=perf, accuracy=(acc_detail or {}).get(tk),
             model=model.ticker_model(row) if row is not None else {},
             stats=_row_stats(row) if row is not None else {},
         )
@@ -207,9 +208,14 @@ def run(scan_only: bool = False, reuse: bool = False):
 
     if not scan_only:
         strat = {}
-        for col, key in (("options", "options_daytrade"), ("stock", "stock_daytrade"), ("straddle", "earnings_straddle")):
+        TRIALS = 14          # strategy / model variants tried on this data so far (ablation + research + sizing)
+        for col, key in (("swing", "swing_5d"), ("stock", "stock_daytrade"), ("options", "options_daytrade"),
+                         ("straddle", "earnings_straddle")):
+            if col not in curve:
+                continue
             strat[key] = stats(curve[col], trades[trades["strategy"] == key] if len(trades) else None)
             strat[key]["monthly"] = monthly_returns(curve, col)
+            strat[key]["robustness"] = deflated_sharpe(curve[col], TRIALS)
         mc = {col: monte_carlo(curve, col, start=SETTINGS.risk.starting_capital) for col in ("options", "stock")}
         lt = longterm.backtest(panel)
         top_tickers = (sig[sig["liquid"] & sig["z_oc"].notna()].groupby(level="ticker")
@@ -232,7 +238,16 @@ def run(scan_only: bool = False, reuse: bool = False):
         ))
         _write("longterm.json", dict(ranking=longterm.current_ranking(panel, tables["tickers"]), backtest=lt))
         log("ticker profiles")
-        ticker_profiles(panel, sig, trades, tables, model)
+        acc_table, acc_detail = accuracy_per_ticker(sig)
+        names = tables["tickers"].set_index("ticker")
+        for row in acc_table:
+            row["name"] = names.at[row["ticker"], "name"] if row["ticker"] in names.index else row["ticker"]
+            row["sector"] = names.at[row["ticker"], "sector"] if row["ticker"] in names.index else ""
+        idx_path = ARTIFACT_DIR / "indexfunds.json"
+        _write("accuracy.json", dict(summary=accuracy_summary(acc_table), stocks=acc_table,
+                                     index=json.loads(idx_path.read_text()) if idx_path.exists() else None,
+                                     period=dict(start=curve["date"].iloc[0], end=curve["date"].iloc[-1])))
+        ticker_profiles(panel, sig, trades, tables, model, acc_detail)
 
     brief = run_scan(panel, tables, model)
     _write("brief.json", brief)

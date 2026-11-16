@@ -87,7 +87,7 @@ def expected_iv_at_open(df: pd.DataFrame):
 
 # Columns the signal / simulation / reporting steps read. On the full universe, joining only these
 # (not all ~150 feature columns) keeps the backtest within memory.
-SIGNAL_COLS = ["open_px", "close_px", "prev_close", "high_px", "low_px", "r_oc", "r_cc", "r_fwd20", "z_oc", "z_x", "y_dir",
+SIGNAL_COLS = ["open_px", "close_px", "prev_close", "high_px", "low_px", "r_oc", "r_cc", "r_fwd5", "r_fwd20", "z_oc", "z_x", "z5_x", "y_dir",
                "sig_d", "rv20", "is_earnings", "days_to_earn", "hist_earn_move", "eps_surprise", "iv30", "ivw_prev",
                "ivw_t", "gap_pre", "gap_pre_z", "atm_spread", "log_adv20", "log_opt_vol20", "news_on_count",
                "news_on_wsent", "mkt_gap"]
@@ -189,7 +189,8 @@ def simulate(sig: pd.DataFrame, straddles: bool = True) -> dict:
     """straddles=False when IV is estimated: a straddle's edge is (realised move - implied move), and
     an estimated implied move makes that number an artefact of the estimate, not a measurement."""
     r = SETTINGS.risk
-    eq_o = eq_s = eq_e = r.starting_capital
+    eq_o = eq_s = eq_e = eq_w = r.starting_capital
+    swing_queue: list[float] = []
     curve, trades = [], []
     stress = 1.0
     for date, day in sig.groupby(level="date"):
@@ -243,13 +244,36 @@ def simulate(sig: pd.DataFrame, straddles: bool = True) -> dict:
                                    pnl=round(float(eq_e * f * max(rr, -1)), 2),
                                    stock_move=None, hit=int(rr > 0), earnings=1,
                                    implied_move=round(float(im), 4), hist_move=round(float(hm), 4)))
+        # 5-session swing book: a new sleeve each day (top-k long / bottom-k short by the 5-day model),
+        # each sleeve gets 1/5 of capital at 1x long + 1x short, booked when it closes (4 sessions later)
+        if "mu5" in day:
+            liq5 = day[day["liquid"] & day["mu5"].notna() & day["r_fwd5"].notna()]
+            k5 = r.swing_k
+            if len(liq5) >= 4 * k5:
+                lg, sh = liq5.nlargest(k5, "mu5"), liq5.nsmallest(k5, "mu5")
+                cost = 2 * SETTINGS.costs.stock_slippage_bps / 1e4
+                sleeve = (np.expm1(lg["r_fwd5"]).mean() - cost) - (np.expm1(sh["r_fwd5"]).mean() + cost)
+                swing_queue.append(sleeve / 5.0)
+                for side, grp in (("LONG", lg), ("SHORT", sh)):
+                    for (dt, tk), row in zip(grp.index, grp.itertuples()):
+                        sgn = 1 if side == "LONG" else -1
+                        rr = sgn * float(np.expm1(row.r_fwd5)) - cost
+                        trades.append(dict(date=str(dt.date()), ticker=tk, side=side, strategy="swing_5d", conf=None,
+                                           ev=round(float(row.mu5), 4), strike=None, entry=round(float(row.open_px), 2),
+                                           ret=round(rr, 5), risk_frac=round(1 / (5 * k5), 4),
+                                           pnl=round(eq_w * rr / (5 * k5), 2), stock_move=round(float(row.r_fwd5), 4),
+                                           hit=int(rr > 0), earnings=int(row.is_earnings)))
+            else:
+                swing_queue.append(0.0)
+            if len(swing_queue) > 4:
+                eq_w *= 1 + swing_queue.pop(0)
         day_ret_o = pnl_o / eq_o
         eq_o += pnl_o
         eq_s += pnl_s
         eq_e += pnl_e
         stress = 0.5 if day_ret_o < -r.daily_loss_stop else 1.0
         curve.append(dict(date=str(date.date()), options=round(eq_o, 2), stock=round(eq_s, 2),
-                          straddle=round(eq_e, 2), n=len(picks)))
+                          straddle=round(eq_e, 2), swing=round(eq_w, 2), n=len(picks)))
     curve = pd.DataFrame(curve)
     return {"curve": curve, "trades": pd.DataFrame(trades)}
 
@@ -280,6 +304,26 @@ def stats(equity: pd.Series, trades: pd.DataFrame | None = None) -> dict:
                    profit_factor=float(trades.loc[trades.pnl > 0, "pnl"].sum() /
                                        max(1e-9, -trades.loc[trades.pnl <= 0, "pnl"].sum())))
     return out
+
+
+def deflated_sharpe(equity: pd.Series, trials: int) -> dict:
+    """Bailey & López de Prado (2014). Probability that the true Sharpe is above zero after allowing for
+    having picked the best of `trials` strategy variants, and for skewed / fat-tailed returns."""
+    from scipy.stats import kurtosis, norm, skew
+    eq = equity.astype(float).values
+    r = np.diff(eq) / eq[:-1]
+    r = r[np.isfinite(r)]
+    T = len(r)
+    if T < 60 or r.std() == 0:
+        return dict(sharpe=0.0, psr=None, dsr=None, trials=trials)
+    sr = r.mean() / r.std()                                     # per-period
+    g3, g4 = skew(r), kurtosis(r, fisher=False)
+    se = np.sqrt((1 - g3 * sr + (g4 - 1) / 4 * sr ** 2) / (T - 1))
+    emc = 0.5772156649
+    n = max(trials, 2)
+    sr0 = se * ((1 - emc) * norm.ppf(1 - 1 / n) + emc * norm.ppf(1 - 1 / (n * np.e)))   # expected best of n under no skill
+    return dict(sharpe=float(sr * np.sqrt(252)), psr=float(norm.cdf(sr / se)), dsr=float(norm.cdf((sr - sr0) / se)),
+                sharpe_needed=float(sr0 * np.sqrt(252)), trials=int(trials), skew=float(g3), kurtosis=float(g4))
 
 
 def calibration(sig: pd.DataFrame, bins: int = 10) -> list[dict]:

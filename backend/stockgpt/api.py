@@ -56,6 +56,16 @@ def ablation():
     return _load("ablation.json")
 
 
+@app.get("/api/accuracy")
+def accuracy():
+    return _load("accuracy.json")
+
+
+@app.get("/api/research")
+def research():
+    return _load("research.json")
+
+
 @app.get("/api/universe")
 def universe():
     return _load("universe.json")
