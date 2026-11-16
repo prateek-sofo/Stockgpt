@@ -1,0 +1,9 @@
+[Unit]
+Description=StockGPT full retrain and backtest, Sundays 06:00 New York time
+
+[Timer]
+OnCalendar=Sun *-*-* 06:00:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

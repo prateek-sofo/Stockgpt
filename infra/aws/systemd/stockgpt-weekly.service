@@ -1,0 +1,10 @@
+[Unit]
+Description=StockGPT weekly data refresh and run (full)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=stockgpt
+ExecStart=/srv/stockgpt/current/infra/aws/daily.sh full
+TimeoutStartSec=6h
+Nice=10

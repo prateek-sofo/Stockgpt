@@ -1,0 +1,15 @@
+[Unit]
+Description=StockGPT API and UI (127.0.0.1:8000; reach it through an SSM port-forwarding session)
+After=network-online.target
+
+[Service]
+User=stockgpt
+WorkingDirectory=/srv/stockgpt/current/backend
+Environment=STOCKGPT_DATA_DIR=/srv/stockgpt/data/raw
+Environment=STOCKGPT_ARTIFACT_DIR=/srv/stockgpt/artifacts
+ExecStart=/srv/stockgpt/venv/bin/uvicorn stockgpt.api:app --host 127.0.0.1 --port 8000
+Restart=always
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

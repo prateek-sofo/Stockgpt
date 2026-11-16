@@ -1,0 +1,9 @@
+[Unit]
+Description=StockGPT option-chain and consensus snapshots, weekdays 16:30 New York time
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 16:30:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target

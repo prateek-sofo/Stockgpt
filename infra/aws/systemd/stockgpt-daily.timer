@@ -1,0 +1,9 @@
+[Unit]
+Description=StockGPT morning scan, weekdays 08:40 New York time
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:40:00 America/New_York
+Persistent=true
+
+[Install]
+WantedBy=timers.target
