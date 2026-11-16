@@ -52,6 +52,37 @@ def evaluate(test: pd.DataFrame, pred: np.ndarray) -> dict:
                 hit_bottom=float(s["hit_bot"].mean()), days=int(len(ic)))
 
 
+DATE_LEVEL = ("fred_", "politics_", "world_", "mkt_vix", "mkt_spx", "mkt_dxy", "mkt_oil", "mkt_gold", "mkt_gap",
+              "mkt_ret_1d")
+
+
+def market_model(panel: pd.DataFrame, feats: list[str], split: str) -> dict:
+    """Does the macro/political world predict the *market's* open->close direction? (time series)"""
+    day = panel.index.get_level_values("date")
+    liq = liquid_mask(panel)
+    mret = panel.loc[liq.values, "r_oc"].groupby(level="date").mean()
+    cols = [c for c in feats if c.startswith(DATE_LEVEL)]
+    X = panel[cols].groupby(level="date").first()
+    d = X.join(mret.rename("y")).dropna(subset=["y"])
+    tr, te = d[d.index < split], d[d.index >= split]
+    from sklearn.linear_model import Ridge
+    out = {}
+    for name, model in (("ridge", Ridge(alpha=50.0)),
+                        ("gbm", lgb.LGBMRegressor(n_estimators=300, learning_rate=0.02, num_leaves=7,
+                                                  min_child_samples=40, subsample=0.8, subsample_freq=1,
+                                                  colsample_bytree=0.7, verbose=-1))):
+        Xtr = tr[cols].fillna(0.0)
+        mu, sd = Xtr.mean(), Xtr.std() + 1e-9
+        model.fit((Xtr - mu) / sd, tr["y"])
+        p = model.predict((te[cols].fillna(0.0) - mu) / sd)
+        hit = float((np.sign(p) == np.sign(te["y"])).mean())
+        strat = np.sign(p) * te["y"]
+        out[name] = dict(hit=hit, corr=float(np.corrcoef(p, te["y"])[0, 1]),
+                         ann_ret=float(strat.mean() * 252), sharpe=float(strat.mean() / strat.std() * np.sqrt(252)),
+                         base_up_rate=float((te["y"] > 0).mean()), days=int(len(te)))
+    return dict(features=len(cols), **out)
+
+
 def run(split: str = "2024-01-01", max_train: int = 1_500_000) -> list[dict]:
     tables, src = load_all()
     panel = build_panel(tables)
@@ -63,24 +94,32 @@ def run(split: str = "2024-01-01", max_train: int = 1_500_000) -> list[dict]:
         train = train.iloc[-max_train:]
     test = panel[day >= pd.Timestamp(split)]
     test = test[liquid_mask(test).values]
+    # stock-relative target: the day's cross-sectional average removed (what ranking long/short trades)
+    for df in (train,):
+        df["z_x"] = df["z_oc"] - df.groupby(level="date")["z_oc"].transform("mean")
     params = dict(objective="huber", alpha=1.5, n_estimators=400, learning_rate=0.02, num_leaves=15,
                   min_child_samples=1000, subsample=0.8, subsample_freq=1, colsample_bytree=0.8,
                   reg_lambda=5.0, verbose=-1, n_jobs=4)
-    results, used = [], []
-    for name, rule in GROUPS.items():
-        add = [c for c in feats if rule(c) and c not in used]
-        if not add or train[add].std().fillna(0).max() == 0:
-            results.append(dict(step=f"+ {name}", added=0, note="no data for this group yet"))
-            continue
-        used += add
-        m = lgb.LGBMRegressor(**params).fit(train[used].astype(np.float32), train["z_oc"])
-        r = evaluate(test, m.predict(test[used].astype(np.float32)))
-        imp = pd.Series(m.booster_.feature_importance("gain"), index=used)
-        r.update(step=f"+ {name}", added=len(add), features=len(used),
-                 top_new=[k for k in (imp[add] / imp.sum()).sort_values(ascending=False).head(4).index])
-        results.append(r)
-        print(json.dumps(r), flush=True)
-    (ARTIFACT_DIR / "ablation.json").write_text(json.dumps(dict(split=split, source=src, results=results), indent=1))
+    results = []
+    for target in ("z_oc", "z_x"):
+        used = []
+        for name, rule in GROUPS.items():
+            add = [c for c in feats if rule(c) and c not in used]
+            if not add or train[add].std().fillna(0).max() == 0:
+                results.append(dict(target=target, step=f"+ {name}", added=0, note="no data for this group yet"))
+                continue
+            used += add
+            m = lgb.LGBMRegressor(**params).fit(train[used].astype(np.float32), train[target])
+            r = evaluate(test, m.predict(test[used].astype(np.float32)))
+            imp = pd.Series(m.booster_.feature_importance("gain"), index=used)
+            r.update(target=target, step=f"+ {name}", added=len(add), features=len(used),
+                     top_new=[k for k in (imp[add] / imp.sum()).sort_values(ascending=False).head(4).index])
+            results.append(r)
+            print(json.dumps(r), flush=True)
+    mkt = market_model(panel, feats, split)
+    print(json.dumps(dict(market_model=mkt)), flush=True)
+    (ARTIFACT_DIR / "ablation.json").write_text(json.dumps(dict(split=split, source=src, results=results,
+                                                                market_model=mkt), indent=1))
     return results
 
 
