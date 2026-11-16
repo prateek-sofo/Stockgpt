@@ -40,6 +40,7 @@ export interface Stats {
   start: number; end: number; total_return: number; cagr: number; sharpe: number; sortino: number; max_drawdown: number;
   vol_annual: number; best_day: number; worst_day: number; days: number; trades?: number; win_rate?: number;
   avg_win?: number; avg_loss?: number; profit_factor?: number; monthly: { year: number; month: number; ret: number }[];
+  robustness?: Robustness;
 }
 
 export interface Scenario {
@@ -66,7 +67,7 @@ export interface LongtermBT {
 export interface Backtest {
   period: { start: string; end: string; days: number };
   strategies: Record<string, Stats>;
-  curve: { date: string; options: number; stock: number; straddle: number; n: number }[];
+  curve: { date: string; options: number; stock: number; straddle: number; swing?: number; n: number }[];
   signal: {
     ic: { ic_mean: number; ic_ir: number; hit_rate_all: number; hit_rate_conf60: number | null; auc: number };
     calibration: { pred: number; actual: number; n: number; ret: number }[];
@@ -97,6 +98,7 @@ export interface TickerProfile {
     trades?: Record<string, { n: number; win: number; pnl: number }>; recent_trades?: Trade[];
   };
   model: Record<string, TraitModel>;
+  accuracy?: AccuracyDetail | null;
   stats: {
     rv20: number; iv30: number | null; iv_rank: number | null; adv: number; opt_vol: number; spread: number | null;
     days_to_earn: number; hist_earn_move: number | null;
@@ -112,3 +114,29 @@ export interface Longterm {
   ranking: { ticker: string; name: string; sector: string; score: number; drivers: { label: string; z: number }[] }[];
   backtest: LongtermBT;
 }
+
+export interface AccuracyRow {
+  ticker: string; name?: string; sector?: string; kind: string; days: number; liquid_share: number; rel_accuracy: number; z: number;
+  up_accuracy: number; up_rate: number; strong_n: number; strong_accuracy: number | null; strong_bps: number | null;
+  signal_bps: number; ic: number; acc_5d?: number; z_5d?: number; signal_5d_bps?: number; n_5d?: number;
+}
+export interface AccuracyDetail extends Omit<AccuracyRow, "ticker" | "kind"> {
+  by_year: { year: number; accuracy: number; n: number; bps: number }[];
+  curve: { d: string; signal: number; stock: number }[];
+  rolling: { d: string; acc: number }[];
+}
+export interface FundHorizon {
+  n: number; accuracy: number; up_rate: number; best_naive: number; edge_vs_naive: number; z_vs_naive: number;
+  conf_n: number; conf_accuracy: number | null; signal_ann: number; buyhold_ann: number; signal_sharpe: number;
+  buyhold_sharpe: number; by_year: Record<string, number>; curve: { d: string; signal: number; buyhold: number }[];
+}
+export interface IndexFund { ticker: string; name: string; kind: string; h1: FundHorizon; h5: FundHorizon; latest: { date: string; p_up_1d: number; p_up_5d: number } }
+export interface AccuracyData {
+  summary: { stocks: number; median_accuracy: number; mean_accuracy: number; liquid_median_accuracy: number; strong_median_accuracy: number;
+    above_55: number; below_45: number; significant_good: number; significant_bad: number; expected_by_chance: number; hist: number[]; hist_edges: number[] };
+  stocks: AccuracyRow[]; index: { period: { start: string; end: string }; funds: IndexFund[]; method: string } | null;
+  period: { start: string; end: string };
+}
+export interface ResearchVariant { variant: string; hold_days: number; note: string; ic: number; ic_t: number; spread_bps: number; gross_bps_day: number; net_bps_day: number; net_ann: number; sharpe: number; hit_long: number; hit_short: number; by_year: Record<string, number>; days: number }
+export interface Research { split: string; purge_sessions: number; train_rows: number; test_rows: number; cost_bps_round_trip: number; book: string; variants: ResearchVariant[]; top_features_5d: { feature: string; importance: number; research: boolean }[] }
+export interface Robustness { sharpe: number; psr: number | null; dsr: number | null; sharpe_needed?: number; trials: number }
