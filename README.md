@@ -91,6 +91,39 @@ S3 under `briefs/` as the live track record) and Sundays 06:00 (SEC bulk refresh
 5. **Risk.** Liquidity gate (price, $ volume, options volume, spread), quarter Kelly, ≤2% premium per trade, ≤8% per day, size halved after a −5% day.
 6. **Walk-forward backtest.** Monthly refit, expanding window, 1-day embargo. Options priced with Black-Scholes on front-week IV, open IV marked up by the premarket gap, one session of theta, post-earnings IV crush, half-spread paid each side, commissions.
 
+## Competitors, the political world, and daily snapshots
+
+* **Competitors and peers** (`peers.py`): Sofo World's competitor / customer / supplier graph (exported with the
+  news), SEC industry peers (4-digit SIC, widened when small) and return-correlation peers (top 10, re-estimated
+  quarterly from past data). Features: peers' overnight news, peers' earnings surprises since the last close,
+  peers' earnings-day reactions, customer/supplier news.
+* **Political world and macro** (`sources/macro.py`): Economic Policy Uncertainty (daily, newspaper-based, FRED),
+  Caldara-Iacoviello Geopolitical Risk (daily, acts and threats), rates and curve, credit spreads, breakevens,
+  VIX, dollar, oil, gold, S&P 500, sector ETFs; GDELT theme timelines when GDELT allows. Shown on the brief.
+* **Snapshots** (`sources/snapshots.py`): premarket prints before the scan (60-day backfill), and after the close
+  the option chains (front-week and 30-day ATM IV, volume, spread) and consensus EPS. History free data does not
+  have accumulates from the first day; the backtest uses real IV and consensus wherever recorded.
+
+## Real-data results (walk-forward, Jan 2020 → Nov 2026, 2,591 US companies, costs included)
+
+Holdout ablation (`python -m stockgpt.ablation`, train < 2024, test 2024-01 → 2026-11, liquid names):
+
+| target | features | IC | t | top-bottom decile, bps/day |
+|---|---|---|---|---|
+| raw open->close | price | 0.017 | 3.1 | 15 |
+| raw | + earnings / fundamentals | 0.020 | 4.2 | 14 |
+| raw | + competitors / peers | 0.019 | 3.9 | 12 |
+| raw | + macro / political world | 0.016 | 2.3 | 20 |
+| **vs market** | price + earnings / fundamentals | **0.021** | 3.1 | **25** |
+| vs market | + macro / political world | 0.016 | 2.4 | 16 |
+
+Market-direction model from the political world: 50.6% of sessions right vs 48.7% up-days (Sharpe 0.28): no edge.
+
+What this means: on prices, filings, earnings and the political world alone, the signal is real but small
+(IC ~0.01-0.02). A daily market-neutral long/short book of the top/bottom names earns ~10-18 bps gross per day
+and roughly 0-3 bps after 6 bps round-trip costs, with losing years; the backtested share and option strategies lose
+money after costs. The missing input is company news (Sofo World); every feature and adapter for it is in place.
+
 ## Demo results (synthetic market, out-of-sample, Jan 2025 → Nov 2026)
 
 | strategy | total | Sharpe | max DD | notes |

@@ -59,6 +59,8 @@ class RiskConfig:
     min_edge_prob: float = 0.53                 # min calibrated P(direction correct)
     min_ev: float = 0.03                        # min model EV on premium (3%) after costs
     market_neutral: bool = True                 # stock day trades: equal long and short books
+    stock_selection: str = "rank"               # "rank": long top-k / short bottom-k; "threshold": prob + EV gates
+    rank_k: int = 10
     stock_leverage: float = 2.0                 # gross intraday exposure for stock day trades
     daily_loss_stop: float = 0.05               # stop trading the day after -5% day
 

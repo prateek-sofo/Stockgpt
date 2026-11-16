@@ -154,6 +154,20 @@ def _select_stock(day: pd.DataFrame, n: int):
     """Stock day trades: rank by expected return in bps after round-trip slippage."""
     cost = 2 * SETTINGS.costs.stock_slippage_bps / 1e4
     er = (2 * day["conf"] - 1) * day["exp_move_pct"] - cost
+    if SETTINGS.risk.stock_selection == "rank":
+        # ranking signal traded as a ranking: long the k strongest, short the k weakest liquid names
+        k = max(1, n // 2) if n < 2 * SETTINGS.risk.rank_k else SETTINGS.risk.rank_k
+        liq = day[day["liquid"]].assign(exp_ret=er)
+        # relative ranking: top k long, bottom k short whatever the sign of mu (equal books = market-neutral)
+        if len(liq) < 2 * k:
+            return liq.iloc[:0]
+        longs = liq.nlargest(k, "mu").assign(side="CALL")
+        shorts = liq.nsmallest(k, "mu").assign(side="PUT")
+        out = pd.concat([longs, shorts])
+        sign = np.where(out["side"] == "CALL", 1, -1)
+        out["stock_ret"] = sign * out["r_oc"] - 2 * SETTINGS.costs.stock_slippage_bps / 1e4
+        out["hit"] = (np.sign(out["r_oc"]) == sign).astype(int)
+        return out
     c = day[day["liquid"] & (day["conf"] >= SETTINGS.risk.min_edge_prob) & (er > 0)].assign(exp_ret=er)
     if not SETTINGS.risk.market_neutral:
         return c.nlargest(n, "exp_ret")
@@ -194,11 +208,15 @@ def simulate(sig: pd.DataFrame, straddles: bool = True) -> dict:
                                    risk_frac=round(float(f), 4), pnl=round(float(eq_o * f * max(row.opt_ret, -1)), 2),
                                    stock_move=round(float(row.r_oc), 4), hit=int(row.hit),
                                    earnings=int(row.is_earnings), moneyness=float(row.moneyness)))
-        sp = _select_stock(day, r.max_positions)
+        sp = _select_stock(day, 2 * r.rank_k if r.stock_selection == "rank" else r.max_positions)
         if len(sp):
-            notional = r.stock_leverage / max(len(sp), r.max_positions)
-            pnl_s = float((eq_s * notional * sp["stock_ret"].values).sum())
-            for (dt, tk), row in zip(sp.index, sp.itertuples()):
+            # equal weight across the long and short books (inverse-vol sizing was tested and did worse:
+            # it concentrates on calm names where fixed costs exceed the edge)
+            notional_v = np.full(len(sp), r.stock_leverage / max(len(sp), 1 if r.stock_selection == "rank" else r.max_positions))
+            notional = float(notional_v.mean())
+            pnl_s = float((eq_s * notional_v * sp["stock_ret"].values).sum())
+            for (dt, tk), row, nv in zip(sp.index, sp.itertuples(), notional_v):
+                notional = float(nv)
                 trades.append(dict(date=str(dt.date()), ticker=tk, side="LONG" if row.side == "CALL" else "SHORT",
                                    strategy="stock_daytrade", conf=round(row.conf, 4), ev=round(float(row.exp_ret), 5),
                                    strike=None, entry=round(float(row.open_px), 2), ret=round(float(row.stock_ret), 5),

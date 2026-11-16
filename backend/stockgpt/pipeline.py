@@ -65,6 +65,13 @@ def data_notes(panel, tables, source) -> list[dict]:
         notes.append(dict(level="warn", text="No historical options prices: IV is estimated from realised volatility. "
                           "Option results are indicative; the earnings-straddle strategy is disabled because its edge "
                           "(realised minus implied move) cannot be measured with an estimated implied move."))
+    from .config import DATA_DIR
+    if not (DATA_DIR / "sofo_relationships.parquet").exists():
+        notes.append(dict(level="info", text="Sofo World competitor graph not connected: competitors are SEC "
+                          "industry peers and return-correlation peers. The graph's membership is today's when connected."))
+    notes.append(dict(level="info", text="Macro and political world (policy uncertainty, geopolitical risk, rates, "
+                      "credit, VIX, dollar, oil) was tested in the holdout ablation: it did not forecast next-session "
+                      "market or stock-relative direction, so it is shown as context and not used by the stock model."))
     notes.append(dict(level="info", text="Survivorship bias: the universe is today's SEC-listed companies, so stocks "
                       "that were delisted (bankruptcies, acquisitions) are missing. Real results would be lower."))
     notes.append(dict(level="info", text="Earnings surprise is measured against the same quarter a year earlier "
