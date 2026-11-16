@@ -274,6 +274,8 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     panel["sig_d"] = (panel["rv20"] / np.sqrt(252))
     panel["y_dir"] = (panel["r_oc"] > 0).astype(np.int8)
     panel["z_oc"] = (panel["r_oc"] / panel["sig_d"]).clip(-6, 6)
+    # stock-relative target: the day's cross-sectional average removed (what a market-neutral book earns)
+    panel["z_x"] = panel["z_oc"] - panel.groupby(level="date")["z_oc"].transform("mean")
     panel = panel.replace([np.inf, -np.inf], np.nan)
     panel = panel[panel["rv20"].notna()].sort_index()
     if iv_source == "estimated" and "hist_earn_move" in panel:
@@ -341,19 +343,23 @@ def add_ticker_traits(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 TARGET_COLS = {"r_oc", "r_cc", "r_gap", "r_fwd5", "r_fwd20", "open_px", "close_px", "prev_close",
-               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc"}
+               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc", "z_x"}
 
 # Interpretable linear core. tx_* terms carry each ticker's own sensitivities.
-LINEAR_FEATURES = ["peer_ind_news", "peer_comp_news", "peer_corr_news", "peer_ind_earn_surp", "peer_comp_earn_surp",
-                   "peer_corr_earn_surp", "peer_ind_ret1", "peer_corr_ret1", "peer_ind_earn_react", "supply_news",
-                   "sector_etf_ret1", "world_politics_risk", "fred_epu_z", "world_economy_attn", "world_politics_attn", "world_economy_tone",
-                   "world_politics_tone", "mkt_vix_chg", "fred_dgs10_chg5", "fred_hy_spread_chg5",
-                   "tx_peer_ind_earn_surp", "tx_peer_ind_ret1", "tx_fred_dgs10_chg5", "tx_world_politics_risk",
-                   "news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise",
-                   "ev_earnings", "ev_guidance", "ev_analyst", "news_prior_wsent", "news_5d_wsent",
-                   "tx_news_on_wsent", "tx_gap_pre_z", "tx_ret_1d_z", "tx_eps_surprise",
-                   "mkt_gap", "sector_gap_rel"]
+LINEAR_FEATURES = ["peer_ind_news", "peer_comp_news", "peer_corr_news", "peer_ind_earn_surp", "peer_comp_earn_surp", "peer_corr_earn_surp", "peer_ind_earn_react", "supply_news", "tx_peer_ind_earn_surp", "news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise", "ev_earnings", "ev_guidance", "ev_analyst", "news_prior_wsent", "news_5d_wsent", "tx_news_on_wsent", "tx_gap_pre_z", "tx_ret_1d_z", "tx_eps_surprise", "mkt_gap", "sector_gap_rel"]
 
 
-def feature_columns(panel: pd.DataFrame) -> list[str]:
-    return [c for c in panel.columns if c not in TARGET_COLS and not c.startswith(("_", "n_"))]
+# Kept in the panel (shown as context in the UI) but not fed to the stock model. The holdout ablation
+# (stockgpt/ablation.py, 2024-01 -> 2026-11) showed day-level macro/political features and peers' price
+# moves lowered out-of-sample IC of the stock-relative model; they predict the market, not the stock.
+STOCK_MODEL_EXCLUDE = ("fred_", "politics_", "world_", "mkt_vix", "mkt_spx", "mkt_dxy", "mkt_oil", "mkt_gold",
+                       "sector_etf_ret1", "tr_fred", "tx_fred", "tr_world", "tx_world",
+                       "peer_ind_ret1", "peer_corr_ret1", "peer_comp_ret1", "supply_ret1",
+                       "tr_peer_ind_ret1", "tx_peer_ind_ret1")
+
+
+def feature_columns(panel: pd.DataFrame, include_context: bool = False) -> list[str]:
+    cols = [c for c in panel.columns if c not in TARGET_COLS and not c.startswith(("_", "n_"))]
+    if not include_context:
+        cols = [c for c in cols if not c.startswith(STOCK_MODEL_EXCLUDE)]
+    return cols

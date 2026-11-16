@@ -137,7 +137,18 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
     movers = [dict(ticker=tk, name=meta.at[tk, "name"], gap=float(r["gap_pre"]), gap_z=float(r["gap_pre_z"]),
                    news=int(r["news_on_count"]), sentiment=float(r["news_on_wsent"]), prob_up=float(r["p_cal"]))
               for (_, tk), r in movers.iterrows()]
+    first = today.iloc[0]
+    def g(c):
+        v = first.get(c, np.nan)
+        return float(v) if pd.notna(v) else None
+    world = dict(politics_risk=g("world_politics_risk"), policy_uncertainty_z=g("fred_epu_z"),
+                 geopolitical_risk_z=g("politics_gpr_z"), geopolitical_threats_z=g("politics_gpr_threats_z"),
+                 vix=g("mkt_vix"), vix_chg=g("mkt_vix_chg"), curve_10_2=g("fred_curve_10_2"),
+                 hy_spread=g("fred_hy_spread"), hy_spread_chg5=g("fred_hy_spread_chg5"),
+                 dgs10_chg5=g("fred_dgs10_chg5"), spx_ret1=g("mkt_spx_ret1"), dxy_ret1=g("mkt_dxy_ret1"),
+                 oil_ret1=g("mkt_oil_ret1"), gold_ret1=g("mkt_gold_ret1"))
     return dict(
+        world=world,
         scan_date=str(scan_date.date()), generated_for="09:00 ET premarket",
         equity=equity, universe_size=int(liquid.shape[0]), scanned=int(sig.shape[0]),
         market=dict(premarket_gap=float(today["mkt_gap"].iloc[0]), news_items=int(today["news_on_count"].sum()),

@@ -51,6 +51,11 @@ def backtest():
     return _load("backtest.json")
 
 
+@app.get("/api/ablation")
+def ablation():
+    return _load("ablation.json")
+
+
 @app.get("/api/universe")
 def universe():
     return _load("universe.json")

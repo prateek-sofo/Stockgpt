@@ -26,6 +26,7 @@ class ModelConfig:
     # Walk-forward
     min_train_days: int = 250                   # ~1 trading year before first prediction
     retrain_every_days: int = int(os.getenv("STOCKGPT_RETRAIN_DAYS", "21"))   # 21 = monthly refit
+    target: str = os.getenv("STOCKGPT_TARGET", "z_x")    # z_x = stock-relative, z_oc = raw open->close
     max_gbm_rows: int = int(os.getenv("STOCKGPT_MAX_GBM_ROWS", "1500000"))   # most recent rows for the GBMs
     embargo_days: int = 1                       # gap between train end and test start
     # Hierarchical blend: weight on ticker model = n / (n + shrinkage_k)
@@ -57,6 +58,7 @@ class RiskConfig:
     max_positions: int = 6
     min_edge_prob: float = 0.53                 # min calibrated P(direction correct)
     min_ev: float = 0.03                        # min model EV on premium (3%) after costs
+    market_neutral: bool = True                 # stock day trades: equal long and short books
     stock_leverage: float = 2.0                 # gross intraday exposure for stock day trades
     daily_loss_stop: float = 0.05               # stop trading the day after -5% day
 

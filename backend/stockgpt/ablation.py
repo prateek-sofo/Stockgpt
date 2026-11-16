@@ -87,7 +87,7 @@ def run(split: str = "2024-01-01", max_train: int = 1_500_000) -> list[dict]:
     tables, src = load_all()
     panel = build_panel(tables)
     panel = panel[panel["z_oc"].notna()]
-    feats = feature_columns(panel)
+    feats = feature_columns(panel, include_context=True)
     day = panel.index.get_level_values("date")
     train = panel[day < pd.Timestamp(split) - pd.Timedelta(days=2)]
     if len(train) > max_train:

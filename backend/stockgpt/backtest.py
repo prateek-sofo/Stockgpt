@@ -37,8 +37,9 @@ def walk_forward(panel: pd.DataFrame, features: list[str] | None = None, progres
         model = HierarchicalModel(features).fit(tr)
         # calibrate on all *earlier* out-of-sample predictions (never on this block)
         if preds:
-            hist = pd.concat(preds).join(panel["z_oc"])
-            model.calibrate(hist["mu"].values, hist["z_oc"].values)
+            tgt = SETTINGS.model.target if SETTINGS.model.target in panel else "z_oc"
+            hist = pd.concat(preds).join(panel[tgt])
+            model.calibrate(hist["mu"].values, hist[tgt].values)
         pr = model.predict(te)
         preds.append(pr)
         models.append((test_dates[0], model.cal_slope))
@@ -86,7 +87,7 @@ def expected_iv_at_open(df: pd.DataFrame):
 
 # Columns the signal / simulation / reporting steps read. On the full universe, joining only these
 # (not all ~150 feature columns) keeps the backtest within memory.
-SIGNAL_COLS = ["open_px", "close_px", "prev_close", "high_px", "low_px", "r_oc", "r_cc", "r_fwd20", "z_oc", "y_dir",
+SIGNAL_COLS = ["open_px", "close_px", "prev_close", "high_px", "low_px", "r_oc", "r_cc", "r_fwd20", "z_oc", "z_x", "y_dir",
                "sig_d", "rv20", "is_earnings", "days_to_earn", "hist_earn_move", "eps_surprise", "iv30", "ivw_prev",
                "ivw_t", "gap_pre", "gap_pre_z", "atm_spread", "log_adv20", "log_opt_vol20", "news_on_count",
                "news_on_wsent", "mkt_gap"]
@@ -153,8 +154,15 @@ def _select_stock(day: pd.DataFrame, n: int):
     """Stock day trades: rank by expected return in bps after round-trip slippage."""
     cost = 2 * SETTINGS.costs.stock_slippage_bps / 1e4
     er = (2 * day["conf"] - 1) * day["exp_move_pct"] - cost
-    c = day[day["liquid"] & (day["conf"] >= SETTINGS.risk.min_edge_prob) & (er > 0)]
-    return c.assign(exp_ret=er[c.index]).nlargest(n, "exp_ret")
+    c = day[day["liquid"] & (day["conf"] >= SETTINGS.risk.min_edge_prob) & (er > 0)].assign(exp_ret=er)
+    if not SETTINGS.risk.market_neutral:
+        return c.nlargest(n, "exp_ret")
+    # market-neutral book: the best half longs and the best half shorts (the model ranks stocks vs the market)
+    k = max(1, n // 2)
+    longs = c[c["side"] == "CALL"].nlargest(k, "exp_ret")
+    shorts = c[c["side"] == "PUT"].nlargest(k, "exp_ret")
+    m = min(len(longs), len(shorts))
+    return pd.concat([longs.iloc[:m], shorts.iloc[:m]])
 
 
 def _select(day: pd.DataFrame):
