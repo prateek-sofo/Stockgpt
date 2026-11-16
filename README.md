@@ -3,6 +3,19 @@
 News-driven trading desk: every morning before the open it reads overnight news, scores it, runs a per-ticker model on the liquid options universe, and produces ranked trade tickets for **day trades (shares)**, **options**, **earnings straddles**, plus a **long-term** ranking. Every strategy is walk-forward backtested with realistic costs.
 
 
+## Run it locally (one command)
+
+```bash
+git clone https://github.com/prateek-sofo/Stockgpt && cd Stockgpt
+scripts/local.sh demo     # synthetic market, ~5 min  -> http://localhost:8000
+scripts/local.sh real     # real public data (SEC, Yahoo Finance, FRED): 1.5-3 h first time, ~16 GB RAM
+scripts/local.sh serve    # restart the app on what was built last
+```
+
+Pages: Morning Brief · **Model Accuracy** (per-stock and index-fund backtests) · Backtest Lab (strategies,
+research holdout, ablation, deflated Sharpe) · Growth Planner · Universe · Long-term · Data & Models.
+Research basis: [docs/RESEARCH.md](docs/RESEARCH.md).
+
 ## Quick start
 
 ```bash
@@ -118,6 +131,13 @@ Holdout ablation (`python -m stockgpt.ablation`, train < 2024, test 2024-01 → 
 | vs market | + macro / political world | 0.016 | 2.4 | 16 |
 
 Market-direction model from the political world: 50.6% of sessions right vs 48.7% up-days (Sharpe 0.28): no edge.
+
+**Model v3 (research-driven: 3-seed tree ensemble, stock-relative target, literature signals), full walk-forward
+2020-01 -> 2026-11:** IC 0.018 (was 0.009); per-stock accuracy vs the market: median 51.0%, 51.7% on strong-signal
+days; 426 of 2,588 stocks are significantly better than a coin flip where ~59 would be by luck. After costs the
+25x25 daily long/short book returned +52% in total with Sharpe 0.35 and a -68% drawdown (2022: -47%, 2025: +81%);
+its deflated Sharpe probability is 21%, well short of the 95% bar. The 5-day swing book and option day trades lost
+money. Index funds: 50-53% next-session accuracy, at or below "always up" for most funds.
 
 What this means: on prices, filings, earnings and the political world alone, the signal is real but small
 (IC ~0.01-0.02). A daily market-neutral long/short book of the top/bottom names earns ~10-18 bps gross per day
