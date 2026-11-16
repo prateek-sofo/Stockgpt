@@ -111,6 +111,12 @@ def fundamentals(ciks: set[int], zip_path: Path | None = None) -> pd.DataFrame:
                         cur = series[concept].get(r["end"])
                         if cur is None or r["filed"] < cur["filed"]:     # first-reported value
                             series[concept][r["end"]] = r
+            # shares outstanding (cover page, dei) -> market cap at any later date
+            dei = facts.get("dei", {}).get("EntityCommonStockSharesOutstanding", {}).get("units", {}).get("shares", [])
+            for r in _quarterly(dei, duration=False):
+                cur = series["shares"].get(r["end"])
+                if cur is None or r["filed"] < cur["filed"]:
+                    series["shares"][r["end"]] = r
             if "revenue" not in series:
                 continue
             df = pd.DataFrame({c: {e: r["val"] for e, r in s.items()} for c, s in series.items()})
@@ -139,6 +145,7 @@ def fundamentals(ciks: set[int], zip_path: Path | None = None) -> pd.DataFrame:
                 if "eps" in df else np.nan,
                 "net_debt_to_revenue": ((df.get("debt", 0) - df.get("cash", 0)) / ttm_rev).values
                 if "debt" in df or "cash" in df else np.nan,
+                "shares": df.get("shares", pd.Series(np.nan, index=df.index)).values,
             }))
     if not out:
         return pd.DataFrame()

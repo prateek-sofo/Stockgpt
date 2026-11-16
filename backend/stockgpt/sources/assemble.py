@@ -52,8 +52,10 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
     fund = pd.merge_asof(fund.sort_values("report_date"), close, left_on="report_date", right_on="date",
                          by="ticker", direction="backward").drop(columns="date")
     fund["pe_ratio"] = (fund["close"] / fund["eps_ttm"]).where(fund["eps_ttm"] > 0).clip(0, 300)
+    fund["shares"] = fund.groupby("ticker")["shares"].ffill() if "shares" in fund else np.nan
+    last_shares = fund.sort_values("report_date").groupby("ticker")["shares"].last()
     fund = fund[["ticker", "report_date", "revenue_growth_yoy", "gross_margin", "operating_margin",
-                 "net_margin", "fcf_margin", "eps_growth_yoy", "net_debt_to_revenue", "pe_ratio"]]
+                 "net_margin", "fcf_margin", "eps_growth_yoy", "net_debt_to_revenue", "pe_ratio", "shares"]]
 
     earn = pd.read_parquet(DATA_DIR / "sec_earnings.parquet")
     earn = earn[earn["ticker"].isin(keep)].copy()
@@ -72,8 +74,8 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
 
     tick = t[t["ticker"].isin(keep)].drop_duplicates("ticker")
     last_px = px.groupby("ticker")["close"].last()
-    tick = tick.assign(market_cap=np.nan, last_close=tick["ticker"].map(last_px))
-    out = dict(tickers=tick[["ticker", "name", "sector", "industry", "market_cap"]],
+    tick = tick.assign(market_cap=tick["ticker"].map(last_shares) * tick["ticker"].map(last_px))
+    out = dict(tickers=tick[["ticker", "name", "sector", "industry", "sic", "market_cap"]],
                prices=px[["date", "ticker", "open", "high", "low", "close", "volume"]],
                fundamentals=fund, earnings=earn, news=news)
     opt = DATA_DIR / "options_vendor.parquet"

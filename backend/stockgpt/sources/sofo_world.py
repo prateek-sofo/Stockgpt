@@ -84,6 +84,61 @@ WHERE e.subject_type = 'company' AND e.event_date >= %(since)s
 """
 
 
+REL_SQL = """
+WITH tick AS (
+  SELECT DISTINCT ON (entity_id) entity_id, upper(id_value) AS ticker
+  FROM entity_identifiers WHERE entity_type = 'company' AND id_type = 'ticker'
+  ORDER BY entity_id, confidence DESC, last_seen DESC
+), cik AS (
+  SELECT DISTINCT ON (entity_id) entity_id, ltrim(id_value, '0') AS cik
+  FROM entity_identifiers WHERE entity_type = 'company' AND id_type = 'cik'
+  ORDER BY entity_id, confidence DESC, last_seen DESC
+)
+SELECT ta.ticker, ca.cik, tb.ticker AS other_ticker, cb.cik AS other_cik,
+       r.rel_type, r.confidence, r.first_seen, r.valid_to, r.source_id
+FROM relationships r
+LEFT JOIN tick ta ON ta.entity_id = r.from_id LEFT JOIN cik ca ON ca.entity_id = r.from_id
+LEFT JOIN tick tb ON tb.entity_id = r.to_id   LEFT JOIN cik cb ON cb.entity_id = r.to_id
+WHERE r.from_type = 'company' AND r.to_type = 'company'
+  AND r.rel_type IN ('competitor', 'customer', 'supplier', 'partner')
+  AND r.valid_to IS NULL
+"""
+
+
+def _map_cik(df: pd.DataFrame, sec_tickers: pd.DataFrame | None, tcol: str, ccol: str) -> None:
+    if sec_tickers is None or ccol not in df:
+        return
+    first = sec_tickers.drop_duplicates("cik")
+    m = first.set_index(first["cik"].astype(str))["ticker"]
+    df[tcol] = df[tcol].fillna(df[ccol].astype(str).map(m))
+
+
+def export_relationships(dsn: str | None = None, dump: str | None = None,
+                         sec_tickers: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Company-to-company competitor / customer / supplier / partner links, as tickers."""
+    if dump:
+        r = _read_any(f"{dump.rstrip('/')}/relationships")
+        ids = _read_any(f"{dump.rstrip('/')}/entity_identifiers")
+        if r.empty or ids.empty:
+            return pd.DataFrame()
+        ids = ids[ids["entity_type"] == "company"].sort_values("confidence", ascending=False)
+        tick = ids[ids["id_type"] == "ticker"].drop_duplicates("entity_id").set_index("entity_id")["id_value"].str.upper()
+        cik = ids[ids["id_type"] == "cik"].drop_duplicates("entity_id").set_index("entity_id")["id_value"].str.lstrip("0")
+        r = r[(r["from_type"] == "company") & (r["to_type"] == "company")
+              & r["rel_type"].isin(["competitor", "customer", "supplier", "partner"]) & r["valid_to"].isna()]
+        df = pd.DataFrame({"ticker": r["from_id"].map(tick), "cik": r["from_id"].map(cik),
+                           "other_ticker": r["to_id"].map(tick), "other_cik": r["to_id"].map(cik),
+                           "rel_type": r["rel_type"], "confidence": r["confidence"], "first_seen": r["first_seen"]})
+    else:
+        import psycopg
+        with psycopg.connect(dsn, options="-c default_transaction_read_only=on") as conn:
+            df = pd.read_sql(REL_SQL, conn)
+    _map_cik(df, sec_tickers, "ticker", "cik")
+    _map_cik(df, sec_tickers, "other_ticker", "other_cik")
+    df = df.dropna(subset=["ticker", "other_ticker"])
+    return df[df["ticker"] != df["other_ticker"]].drop_duplicates(["ticker", "other_ticker", "rel_type"])
+
+
 def export(dsn: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None = None) -> pd.DataFrame:
     import psycopg  # optional dependency
 
@@ -193,5 +248,9 @@ if __name__ == "__main__":
     keep = ["published_at", "ticker", "headline", "body", "source", "url", "kind"]
     out = out[[c for c in keep if c in out]]
     out.to_parquet(DATA_DIR / "sofo_news.parquet", index=False)
+    rel = export_relationships(a.dsn if not a.dump else None, a.dump, sect)
+    if len(rel):
+        rel.to_parquet(DATA_DIR / "sofo_relationships.parquet", index=False)
+        print(f"relationships: {len(rel):,} links ({rel['rel_type'].value_counts().to_dict()})")
     print(f"news rows: {len(out):,}  tickers: {out['ticker'].nunique():,}  "
           f"range: {out['published_at'].min()} -> {out['published_at'].max()}")

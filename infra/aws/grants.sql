@@ -15,5 +15,6 @@ ALTER ROLE sofo_stockgpt CONNECTION LIMIT 2;
 
 GRANT CONNECT ON DATABASE sofo_world TO sofo_stockgpt;
 GRANT USAGE ON SCHEMA public TO sofo_stockgpt;
--- Only what the news export reads: articles, their company mentions, company identifiers, events.
-GRANT SELECT ON news_articles, article_mentions, entity_identifiers, events TO sofo_stockgpt;
+-- Only what StockGPT reads: articles, their company mentions, company identifiers, events, and the
+-- company relationship graph (competitor / customer / supplier / partner).
+GRANT SELECT ON news_articles, article_mentions, entity_identifiers, events, relationships TO sofo_stockgpt;

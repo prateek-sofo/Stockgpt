@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .config import DATA_DIR
 from .nlp.sentiment import LexiconScorer
 
 ET = "America/New_York"
@@ -220,6 +221,32 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
         merged = pd.merge_asof(left, fd, on="date", by="ticker", allow_exact_matches=False)
         merged = merged.set_index(["date", "ticker"])[fcols].add_prefix("f_")
         panel = panel.join(merged)
+        if "f_shares" in panel:
+            pcl = pc.stack(future_stack=True).reindex(panel.index)
+            panel["log_mcap"] = np.log10((panel["f_shares"] * pcl).where(panel["f_shares"] > 0))
+            panel = panel.drop(columns="f_shares")
+
+    # ---------------- competitors and peers ----------------
+    from .peers import peer_features
+    panel = panel.join(peer_features(dates, list(gap.columns), lr, panel, tables))
+
+    # ---------------- macro and political world ----------------
+    macro_path = DATA_DIR / "macro_raw.parquet"
+    if macro_path.exists():
+        from .sources.macro import SECTOR_ETF, daily_features
+        mf = daily_features(pd.read_parquet(macro_path), dates).astype(np.float32)
+        mf.index.name = "date"
+        panel = panel.join(mf, on="date")
+        # the company's own sector ETF move yesterday
+        sect = tables["tickers"].set_index("ticker")["sector"]
+        etf = panel.index.get_level_values("ticker").map(sect).map(SECTOR_ETF)
+        sec_ret = np.full(len(panel), np.nan, dtype=np.float32)
+        for name in set(SECTOR_ETF.values()):
+            col = f"mkt_{name}_ret1"
+            if col in panel:
+                m = (etf == name)
+                sec_ret[m] = panel.loc[m, col].values
+        panel["sector_etf_ret1"] = sec_ret
 
     # ---------------- targets ----------------
     targ = {
@@ -260,6 +287,10 @@ TRAITS = {
     "gap_pre_z": 150.0,        # does it extend (+) or fade (-) its opening gap
     "ret_1d_z": 150.0,         # day-over-day continuation (+) or reversal (-)
     "eps_surprise": 0.5,       # post-earnings drift per unit of EPS surprise
+    "peer_ind_earn_surp": 2.0, # how much it moves with its competitors' earnings surprises
+    "peer_ind_ret1": 300.0,    # follows (+) or diverges from (-) its industry's moves
+    "fred_dgs10_chg5": 300.0,  # its own sensitivity to rate moves
+    "world_politics_risk": 300.0,  # ... and to political-world risk (policy uncertainty, geopolitics)
 }
 
 
@@ -299,7 +330,12 @@ TARGET_COLS = {"r_oc", "r_cc", "r_gap", "r_fwd5", "r_fwd20", "open_px", "close_p
                "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc"}
 
 # Interpretable linear core. tx_* terms carry each ticker's own sensitivities.
-LINEAR_FEATURES = ["news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise",
+LINEAR_FEATURES = ["peer_ind_news", "peer_comp_news", "peer_corr_news", "peer_ind_earn_surp", "peer_comp_earn_surp",
+                   "peer_corr_earn_surp", "peer_ind_ret1", "peer_corr_ret1", "peer_ind_earn_react", "supply_news",
+                   "sector_etf_ret1", "world_politics_risk", "fred_epu_z", "world_economy_attn", "world_politics_attn", "world_economy_tone",
+                   "world_politics_tone", "mkt_vix_chg", "fred_dgs10_chg5", "fred_hy_spread_chg5",
+                   "tx_peer_ind_earn_surp", "tx_peer_ind_ret1", "tx_fred_dgs10_chg5", "tx_world_politics_risk",
+                   "news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise",
                    "ev_earnings", "ev_guidance", "ev_analyst", "news_prior_wsent", "news_5d_wsent",
                    "tx_news_on_wsent", "tx_gap_pre_z", "tx_ret_1d_z", "tx_eps_surprise",
                    "mkt_gap", "sector_gap_rel"]
