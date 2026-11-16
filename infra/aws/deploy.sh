@@ -80,7 +80,7 @@ chown -R stockgpt:stockgpt /srv/stockgpt
 ln -sfn \$D /srv/stockgpt/current
 cp \$D/infra/aws/systemd/* /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now stockgpt-api stockgpt-daily.timer stockgpt-weekly.timer
+systemctl enable --now stockgpt-api stockgpt-daily.timer stockgpt-weekly.timer stockgpt-close.timer
 systemctl restart stockgpt-api
 sleep 3; curl -fsS http://127.0.0.1:8000/api/health
 EOF

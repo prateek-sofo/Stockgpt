@@ -54,6 +54,11 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
     fund["pe_ratio"] = (fund["close"] / fund["eps_ttm"]).where(fund["eps_ttm"] > 0).clip(0, 300)
     fund["shares"] = fund.groupby("ticker")["shares"].ffill() if "shares" in fund else np.nan
     last_shares = fund.sort_values("report_date").groupby("ticker")["shares"].last()
+    # shares-only cover-page rows must not blank out the latest ratios: carry each company's ratios forward
+    fund = fund.sort_values(["ticker", "report_date"])
+    ratio_cols = ["revenue_growth_yoy", "gross_margin", "operating_margin", "net_margin", "fcf_margin",
+                  "eps_growth_yoy", "net_debt_to_revenue", "pe_ratio", "shares"]
+    fund[ratio_cols] = fund.groupby("ticker")[ratio_cols].ffill()
     fund = fund[["ticker", "report_date", "revenue_growth_yoy", "gross_margin", "operating_margin",
                  "net_margin", "fcf_margin", "eps_growth_yoy", "net_debt_to_revenue", "pe_ratio", "shares"]]
 
@@ -78,9 +83,32 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
     out = dict(tickers=tick[["ticker", "name", "sector", "industry", "sic", "market_cap"]],
                prices=px[["date", "ticker", "open", "high", "low", "close", "volume"]],
                fundamentals=fund, earnings=earn, news=news)
+    # daily snapshots (sources/snapshots.py): premarket prints, end-of-day option summaries, consensus
+    from .snapshots import load as load_snap
+    pre = load_snap("premarket")
+    if len(pre):
+        pre["date"] = pd.to_datetime(pre["date"]).astype("datetime64[ns]")
+        out["prices"] = out["prices"].merge(pre[["date", "ticker", "premarket"]], on=["date", "ticker"], how="left")
+    opts = [load_snap("options")]
     opt = DATA_DIR / "options_vendor.parquet"
     if opt.exists():
-        out["options"] = pd.read_parquet(opt)
+        opts.insert(0, pd.read_parquet(opt))
+    opts = [o for o in opts if len(o)]
+    if opts:
+        o = pd.concat(opts, ignore_index=True)
+        o["date"] = pd.to_datetime(o["date"]).astype("datetime64[ns]")
+        out["options"] = o[["date", "ticker", "iv30", "iv_weekly", "option_volume", "atm_spread_pct"]]
+    est = load_snap("estimates")
+    if len(est):
+        # consensus for the quarter being reported = the last '0q' snapshot taken before the report
+        e0 = est[est["period"] == "0q"][["date", "ticker", "eps_avg"]].rename(columns={"date": "snap"})
+        e0["snap"] = pd.to_datetime(e0["snap"]).astype("datetime64[ns]")
+        ea = out["earnings"].sort_values("report_date")
+        ea["report_date"] = pd.to_datetime(ea["report_date"]).astype("datetime64[ns]")
+        ea = pd.merge_asof(ea, e0.sort_values("snap"), left_on="report_date", right_on="snap", by="ticker",
+                           allow_exact_matches=False, tolerance=pd.Timedelta(days=100))
+        ea["eps_estimate"] = ea["eps_avg"].combine_first(ea["eps_estimate"])
+        out["earnings"] = ea.drop(columns=["snap", "eps_avg"])
     return out
 
 

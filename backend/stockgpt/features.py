@@ -110,35 +110,36 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     sec_gap = gap.T.groupby(sectors.values).transform("mean").T
     feats["sector_gap_rel"] = (gap - sec_gap) / sig20
 
-    # options context
-    if len(tables.get("options", [])):
-        op = tables["options"]
-        P = lambda col: op.pivot(index="date", columns="ticker", values=col).reindex(dates)[gap.columns]
-        iv = P("iv30").shift(1)
-        feats["iv30"] = iv
-        feats["iv_rv"] = iv / feats["rv20"]
-        feats["iv_rank"] = iv.rolling(252, min_periods=60).rank(pct=True)
+    # options context. Estimated IV (realised vol + a typical 10% variance premium) everywhere; real IV from
+    # an options feed or the daily snapshots replaces it wherever it exists.
+    rv_long = lr.ewm(span=60, min_periods=20).std() * np.sqrt(252)
+    iv_est = np.maximum(sig20 * np.sqrt(252), rv_long.shift(1)) * 1.10
+    ivt_est = np.maximum(lr.ewm(span=20, min_periods=10).std() * np.sqrt(252), rv_long) * 1.10
+    spread_est = (0.015 + 0.5 / np.sqrt(adv20 / 1e6)).clip(0.015, 0.3)
+    iv, ivw_prev, iv_today, spread = iv_est, iv_est, ivt_est, spread_est
+    iv_source = "estimated"
+    op = tables.get("options")
+    if op is not None and len(op):
+        op = op.drop_duplicates(["date", "ticker"], keep="last")
+        P = lambda col: op.pivot(index="date", columns="ticker", values=col).reindex(index=dates, columns=gap.columns)
+        real30 = P("iv30")
+        realw = P("iv_weekly") if "iv_weekly" in op else real30
+        iv = real30.shift(1).combine_first(iv_est)
+        ivw_prev = realw.shift(1).combine_first(iv_est)
+        iv_today = realw.combine_first(ivt_est)
+        if "atm_spread_pct" in op:
+            spread = P("atm_spread_pct").shift(1).combine_first(spread_est)
         ov = P("option_volume")
         feats["opt_vol_rel"] = ov.shift(1) / ov.rolling(20, min_periods=5).mean().shift(1)
         feats["log_opt_vol20"] = np.log10(ov.rolling(20, min_periods=5).mean().shift(1) + 1)
-        if "atm_spread_pct" in op:
-            feats["atm_spread"] = P("atm_spread_pct").shift(1)
-        ivw = P("iv_weekly") if "iv_weekly" in op else P("iv30")
-        feats["ivw_prev"] = ivw.shift(1)
-        feats["event_premium"] = ivw.shift(1) / iv          # >1 = event priced into front week
-        iv_today = ivw                # end-of-day IV on t: used only to price exits
-        iv_source = "vendor"
-    else:
-        # No options feed: estimate IV from realised vol plus a typical 10% variance premium, and
-        # the ATM spread from dollar volume. Option-strategy results are then indicative only.
-        rv_long = lr.ewm(span=60, min_periods=20).std() * np.sqrt(252)
-        iv_est = np.maximum(sig20 * np.sqrt(252), rv_long.shift(1)) * 1.10
-        feats["iv30"] = iv_est
-        feats["iv_rank"] = iv_est.rolling(252, min_periods=60).rank(pct=True)
-        feats["ivw_prev"] = iv_est
-        feats["atm_spread"] = (0.015 + 0.5 / np.sqrt(adv20 / 1e6)).clip(0.015, 0.3)
-        iv_today = np.maximum(lr.ewm(span=20, min_periods=10).std() * np.sqrt(252), rv_long) * 1.10
-        iv_source = "estimated"
+        coverage = real30.notna().to_numpy().mean()
+        iv_source = "vendor" if coverage > 0.8 else "mixed"
+    feats["iv30"] = iv
+    feats["iv_rv"] = iv / feats["rv20"]
+    feats["iv_rank"] = iv.rolling(252, min_periods=60).rank(pct=True)
+    feats["ivw_prev"] = ivw_prev
+    feats["event_premium"] = ivw_prev / iv          # >1 = event priced into the front week
+    feats["atm_spread"] = spread
 
     panel = pd.concat({k: df.stack(future_stack=True) for k, df in feats.items()}, axis=1)
     panel.index.names = ["date", "ticker"]

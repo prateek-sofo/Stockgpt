@@ -1,0 +1,10 @@
+[Unit]
+Description=StockGPT after-close snapshots (close)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=stockgpt
+ExecStart=/srv/stockgpt/current/infra/aws/daily.sh close
+TimeoutStartSec=6h
+Nice=10
