@@ -84,7 +84,17 @@ def expected_iv_at_open(df: pd.DataFrame):
     return np.nan_to_num(entry, nan=0.4), np.nan_to_num(exit_, nan=0.4)
 
 
-def build_signals(panel: pd.DataFrame, preds: pd.DataFrame) -> pd.DataFrame:
+# Columns the signal / simulation / reporting steps read. On the full universe, joining only these
+# (not all ~150 feature columns) keeps the backtest within memory.
+SIGNAL_COLS = ["open_px", "close_px", "prev_close", "high_px", "low_px", "r_oc", "r_cc", "r_fwd20", "z_oc", "y_dir",
+               "sig_d", "rv20", "is_earnings", "days_to_earn", "hist_earn_move", "eps_surprise", "iv30", "ivw_prev",
+               "ivw_t", "gap_pre", "gap_pre_z", "atm_spread", "log_adv20", "log_opt_vol20", "news_on_count",
+               "news_on_wsent", "mkt_gap"]
+
+
+def build_signals(panel: pd.DataFrame, preds: pd.DataFrame, slim: bool = False) -> pd.DataFrame:
+    if slim:
+        panel = panel[[c for c in SIGNAL_COLS if c in panel]]
     df = panel.join(preds, how="inner")
     df["liquid"] = liquid_mask(df)
     S0 = df["open_px"].values

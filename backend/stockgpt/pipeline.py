@@ -72,10 +72,13 @@ def data_notes(panel, tables, source) -> list[dict]:
     return notes
 
 
-def final_model(panel, features, cal_slope):
+def final_model(panel, features, cal_slope, max_rows: int = 3_000_000):
     last = panel.index.get_level_values("date").max()
-    train = panel[panel.index.get_level_values("date") < last]
+    keep = [c for c in panel.columns if c in set(features) | {"z_oc", "y_dir", "r_oc", "sig_d"}]
+    train = panel.loc[panel.index.get_level_values("date") < last, keep]
+    train = train.iloc[-max_rows:] if len(train) > max_rows else train      # most recent rows (memory)
     m = HierarchicalModel(features).fit(train)
+    del train
     m.cal_slope = cal_slope
     return m
 
@@ -188,7 +191,7 @@ def run(scan_only: bool = False, reuse: bool = False):
         preds.to_parquet(bt_path)
         cal = info["last_model"].cal_slope
 
-    sig = build_signals(panel, preds)
+    sig = build_signals(panel, preds, slim=True)
     vendor_iv = panel.attrs.get("iv_source", "vendor") == "vendor"
     res = simulate(sig, straddles=vendor_iv)
     curve, trades = res["curve"], res["trades"]
