@@ -54,7 +54,7 @@ export default function Ticker() {
           <div className="grid gap-3 md:grid-cols-2">
             {traitRows.map(([k, m]) => {
               const L = TRAIT_LABEL[k];
-              const mkt = 0.7 * m.market_beta;
+              const mkt = m.market_beta;
               const max = Math.max(Math.abs(m.effective), Math.abs(mkt), 1e-6) * 1.3;
               const conf = Math.min(1, m.evidence / (m.evidence + (k === "news_on_wsent" ? 30 : k === "eps_surprise" ? 0.5 : 150)));
               return (

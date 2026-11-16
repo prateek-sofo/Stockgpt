@@ -29,7 +29,7 @@ def next_friday(d: pd.Timestamp, min_days: int = 4) -> pd.Timestamp:
 
 def explain(model: HierarchicalModel, row: pd.Series, top: int = 4) -> list[dict]:
     x = np.array([row.get(f, 0.0) if pd.notna(row.get(f, np.nan)) else 0.0 for f in model.linear_features])
-    contrib = (1 - GBM_WEIGHT) * model.ridge.coef_ * (x - model.lin_mu) / model.lin_sd
+    contrib = model.ridge.coef_ * (x - model.lin_mu) / model.lin_sd
     idx = np.argsort(-np.abs(contrib))[:top]
     return [dict(factor=LABELS.get(model.linear_features[i], model.linear_features[i]),
                  key=model.linear_features[i], value=float(x[i]), contribution=float(contrib[i]))
