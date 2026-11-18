@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { Activity, BarChart3, Database, Gauge, Layers, LineChart, Search, Sunrise, Target, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useApi } from "../lib/api";
+import { STATIC, useApi } from "../lib/api";
 import type { Meta } from "../lib/types";
 
 const NAV = [
@@ -64,7 +64,11 @@ export default function Layout() {
               className="w-full bg-transparent text-[13px] outline-none placeholder:text-ink-500" />
             <kbd className="num rounded border border-ink-700 px-1.5 text-[10px] text-ink-500">↵</kbd>
           </form>
-          {meta?.source === "synthetic" && (
+          {STATIC && (
+            <div className="ml-auto hidden items-center gap-2 rounded-full border border-sky/30 bg-sky/10 px-3 py-1 text-[11.5px] text-sky lg:flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-sky" /> Snapshot of real-data results thru {meta?.data_end}. Ticker pages: {""}the 150 most liquid names.
+            </div>)}
+          {!STATIC && meta?.source === "synthetic" && (
             <div className="ml-auto hidden items-center gap-2 rounded-full border border-amber/30 bg-amber/10 px-3 py-1 text-[11.5px] text-amber lg:flex">
               <span className="h-1.5 w-1.5 rounded-full bg-amber" /> Synthetic demo data. Drop your scraped tables in data/raw to go live.
             </div>

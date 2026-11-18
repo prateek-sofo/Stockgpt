@@ -1,7 +1,7 @@
 import { Cpu, Database, FileJson, GitBranch, Play } from "lucide-react";
 import { useState } from "react";
 import { Card, ErrorBox, Loading, PageHeader, Pill } from "../components/ui";
-import { clearCache, useApi } from "../lib/api";
+import { clearCache, STATIC, useApi } from "../lib/api";
 import type { Meta } from "../lib/types";
 
 const TABLES = [
@@ -50,7 +50,7 @@ export default function Data() {
             <dt className="text-ink-400">Last run</dt><dd className="num">{new Date(data.generated_at).toLocaleString()}</dd>
             <dt className="text-ink-400">Runtime</dt><dd className="num">{data.runtime_sec}s</dd>
           </dl>
-          <div className="mt-5 flex gap-2">
+          <div className={STATIC ? "hidden" : "mt-5 flex gap-2"}>
             <button onClick={() => run("scan")} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-ink-950 hover:brightness-110"><Play className="h-3.5 w-3.5" />Morning scan</button>
             <button onClick={() => run("full")} className="flex items-center gap-2 rounded-xl border border-ink-700 px-3.5 py-2 text-[12.5px] font-medium text-ink-200 hover:border-ink-500"><Cpu className="h-3.5 w-3.5" />Retrain + backtest</button>
           </div>

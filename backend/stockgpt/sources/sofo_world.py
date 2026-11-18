@@ -177,7 +177,15 @@ def _read_any(uri: str) -> pd.DataFrame:
             frames.append(pd.read_csv(path))
         elif path.endswith((".jsonl", ".jsonl.gz", ".ndjson")):
             frames.append(pd.read_json(path, lines=True))
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    # psql CSV writes booleans as t/f and may type ids as numbers: normalise
+    for col in ("is_subject", "is_press_release"):
+        if col in df and df[col].dtype != bool:
+            df[col] = df[col].astype(str).str.lower().isin(["t", "true", "1", "1.0"])
+    for col in ("id_value", "id_type", "entity_type", "rel_type", "subject_type"):
+        if col in df:
+            df[col] = df[col].astype(str)
+    return df
 
 
 def export_from_dump(root: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None = None) -> pd.DataFrame:

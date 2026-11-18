@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import TradeCard from "../components/TradeCard";
 import { Card, ErrorBox, Loading, PageHeader, Pill, SentDot, Stat, Tabs } from "../components/ui";
-import { clearCache, useApi } from "../lib/api";
+import { clearCache, STATIC, useApi } from "../lib/api";
 import { pct, tone } from "../lib/format";
 import type { Brief as B, World } from "../lib/types";
 
@@ -29,7 +29,7 @@ export default function Brief() {
       <PageHeader
         title={<span className="flex items-center gap-3">Morning Brief <Pill color="accent"><Sparkles className="h-3 w-3" />{data.generated_for}</Pill></span>}
         sub={`${day.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · ${data.universe_size} liquid names scanned of ${data.scanned}`}
-        right={<button onClick={rescan} disabled={running}
+        right={STATIC ? <Pill>snapshot</Pill> : <button onClick={rescan} disabled={running}
           className="flex items-center gap-2 rounded-xl border border-ink-700 bg-ink-900 px-3.5 py-2 text-[12.5px] font-medium text-ink-200 transition hover:border-accent/50 hover:text-ink-100 disabled:opacity-50">
           <RefreshCw className={clsx("h-4 w-4", running && "animate-spin")} />{running ? "Scanning…" : "Re-run scan"}
         </button>}
