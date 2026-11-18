@@ -10,3 +10,4 @@ artifacts/*
 !artifacts/.gitkeep
 .env
 *.tsbuildinfo
+snapshot/

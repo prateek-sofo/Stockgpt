@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 
+export const STATIC = import.meta.env.VITE_STATIC === "1";
 const cache = new Map<string, unknown>();
 
 export async function getJSON<T>(path: string): Promise<T> {
   if (cache.has(path)) return cache.get(path) as T;
-  const r = await fetch(`/api/${path}`);
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? r.statusText);
+  // Static snapshot build (VITE_STATIC=1): read bundled result files instead of the live API
+  const url = STATIC ? `data/${path.replace(/^ticker\//, "tickers/")}.json` : `/api/${path}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(STATIC ? "not included in this snapshot (run the app locally for every ticker)"
+    : (await r.json().catch(() => ({}))).detail ?? r.statusText);
   const j = (await r.json()) as T;
   cache.set(path, j);
   return j;
