@@ -6,7 +6,7 @@ import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YA
 import { chartTooltip, ErrorBox, Loading, Pill, SentDot } from "../components/ui";
 import { useApi } from "../lib/api";
 import { compact, num, pct, tone, usd } from "../lib/format";
-import type { AccuracyData, AccuracyRow, Backtest, Brief, Idea, TickerProfile } from "../lib/types";
+import type { AccuracyData, AccuracyRow, Backtest, Brief, DataUsed, Idea, TickerProfile } from "../lib/types";
 
 type Reliability = { level: "Low" | "Moderate" | "High"; color: "down" | "amber" | "up"; text: string };
 
@@ -35,6 +35,8 @@ export default function Today() {
   const settled = [...longs, ...shorts].filter((i) => i.outcome);
   const right = settled.filter((i) => i.outcome!.correct).length;
   const w = data.world;
+  const newsRow = data.data_used?.find((d) => d.source === "Company news");
+  const priceRow = data.data_used?.find((d) => d.source === "Daily prices");
   const hasPremarket = data.movers.some((m) => Math.abs(m.gap) > 1e-6);
   return (
     <div>
@@ -50,6 +52,12 @@ export default function Today() {
               The model ranked {data.universe_size} tradable stocks by how each should do against the market from today's open to the close.
               These are the strongest on each side. {optionIdeas.length ? `${optionIdeas.length} also clear option costs.` : "None clear option costs today, so shares only."}
             </p>
+            {newsRow && (
+              <p className={clsx("mt-3 inline-flex items-start gap-2 rounded-lg px-3 py-2 text-[14px]", newsRow.status === "ok" ? "bg-up/10 text-ink-200" : "bg-amber/10 text-ink-200")}>
+                <span className={clsx("mt-1.5 h-2 w-2 shrink-0 rounded-full", newsRow.status === "ok" ? "bg-up" : "bg-amber")} />
+                {newsRow.status === "ok" ? <span>News used: {newsRow.note}.</span>
+                  : <span><b className="font-semibold text-ink-100">No news was used for these ideas.</b> Sofo World news is not connected, so the ranking rests on prices, filings and earnings through {fmtDay(priceRow?.through)}.</span>}
+              </p>)}
           </div>
           {rel && (
             <div className="w-full max-w-[380px] rounded-xl border border-ink-700 bg-ink-850 p-4">
@@ -109,8 +117,40 @@ export default function Today() {
         </section>}
       </div>
 
+      {data.data_used && <DataUsedTable rows={data.data_used} scan={data.scan_date} />}
+
       {open && <IdeaPanel idea={open} track={track.get(open.ticker)} equity={data.equity} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+const fmtDay = (d?: string | null) => (d ? new Date(d + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "–");
+const STATUS: Record<DataUsed["status"], { c: "up" | "down" | "amber" | "ink"; t: string }> = {
+  ok: { c: "up", t: "Used" }, missing: { c: "down", t: "Not used" }, stale: { c: "amber", t: "Out of date" },
+  estimated: { c: "amber", t: "Estimated" }, partial: { c: "amber", t: "Partly" }, context: { c: "ink", t: "Context only" },
+};
+
+function DataUsedTable({ rows, scan }: { rows: DataUsed[]; scan: string }) {
+  return (
+    <section className="card mt-5 overflow-hidden">
+      <header className="border-b border-ink-700 px-5 py-3.5">
+        <h2 className="text-[16px] font-semibold text-ink-100">Data behind these ideas</h2>
+        <p className="mt-0.5 text-[13.5px] text-ink-400">Everything the model saw for the {fmtDay(scan)} session, and the last date each source covers. Nothing dated after 09:00 New York time on the scan day is used.</p>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[14px]">
+          <thead><tr className="text-left text-[12.5px] text-ink-400">
+            <th className="px-5 py-2.5 font-medium">Source</th><th className="font-medium">Status</th><th className="font-medium">Covers through</th><th className="px-5 font-medium">Detail</th></tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={r.source} className="border-t border-ink-700 align-top">
+              <td className="px-5 py-2.5"><span className="font-medium text-ink-100">{r.source}</span><div className="text-[13px] text-ink-400">{r.what}</div></td>
+              <td className="py-2.5"><Pill color={STATUS[r.status].c}>{STATUS[r.status].t}</Pill></td>
+              <td className="num py-2.5 text-ink-100">{fmtDay(r.through)}</td>
+              <td className="px-5 py-2.5 text-[13.5px] text-ink-300">{r.note || "–"}</td>
+            </tr>))}</tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -263,7 +303,8 @@ function IdeaPanel({ idea: i, track, equity, onClose }: { idea: Idea; track?: Ac
         {i.headlines.length > 0 && (
           <Block title="News since the last close">
             <ul className="space-y-2">{i.headlines.map((h, k) => (
-              <li key={k} className="flex items-start gap-2 text-[14px] text-ink-200"><span className="mt-1.5"><SentDot s={h.sentiment} /></span><span>{h.headline}</span></li>))}</ul>
+              <li key={k} className="flex items-start gap-2 text-[14px] text-ink-200"><span className="mt-1.5"><SentDot s={h.sentiment} /></span>
+                <span>{h.headline}<span className="num block text-[12.5px] text-ink-400">{h.time} ET{h.source ? ` · ${h.source}` : ""}</span></span></li>))}</ul>
           </Block>)}
 
         <Link to={`/t/${i.ticker}`} className="mt-6 inline-flex items-center gap-1 text-[14px] font-medium text-accent hover:underline">Open the full {i.ticker} page <ChevronRight className="h-4 w-4" /></Link>

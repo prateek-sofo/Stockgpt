@@ -80,6 +80,56 @@ def data_notes(panel, tables, source) -> list[dict]:
     return notes
 
 
+def data_used(tables: dict, scan_date) -> list[dict]:
+    """Every input behind a scan, with the dates it covers. Shown on the Today page."""
+    scan = pd.Timestamp(scan_date)
+    out = []
+    def row(name, what, through, status="ok", note=""):
+        out.append(dict(source=name, what=what, through=str(pd.Timestamp(through).date()) if through is not None and pd.notna(through) else None,
+                        status=status, note=note))
+    px = tables["prices"]
+    known = px[px["date"] < scan]["date"].max() if len(px) else None
+    row("Daily prices", "Yahoo Finance, split- and dividend-adjusted", known, note="last close before the scan")
+    has_pre = "premarket" in px and px.loc[px["date"] == scan, "premarket"].notna().any()
+    row("Premarket prices", "Yahoo Finance, last trade before 09:00 ET", scan if has_pre else None,
+        "ok" if has_pre else "missing", "" if has_pre else "not loaded: opening gaps are not used")
+    news = tables.get("news")
+    if news is not None and len(news):
+        ts = pd.to_datetime(news["published_at"], utc=True).dt.tz_convert(ET)
+        cutoff = (scan + pd.Timedelta(hours=9)).tz_localize(ET)
+        seen = ts[ts < cutoff]
+        start = (known + pd.Timedelta(hours=16)).tz_localize(ET) if known is not None else cutoff - pd.Timedelta(days=1)
+        n_window = int(((ts >= start) & (ts < cutoff)).sum())
+        row("Company news", "Sofo World articles and events", seen.max() if len(seen) else None, "ok" if n_window else "stale",
+            f"{n_window:,} articles between {start:%a %b %d %H:%M} and {cutoff:%a %b %d %H:%M} ET; "
+            f"latest {seen.max():%b %d %H:%M} ET; history from {ts.min():%Y-%m-%d}" if len(seen) else "no articles before the scan")
+    else:
+        row("Company news", "Sofo World articles and events", None, "missing", "not connected: no news was used for these ideas")
+    e = tables.get("earnings")
+    if e is not None and len(e):
+        past = e[pd.to_datetime(e["report_date"]) <= scan]
+        row("Earnings dates", "SEC 8-K filings, with before-open or after-close timing", past["report_date"].max() if len(past) else None)
+    f = tables.get("fundamentals")
+    if f is not None and len(f):
+        row("Company financials", "SEC quarterly filings, dated by filing day", f[pd.to_datetime(f["report_date"]) < scan]["report_date"].max())
+    op = tables.get("options")
+    if op is not None and len(op):
+        row("Option prices", "recorded daily snapshots", op[pd.to_datetime(op["date"]) < scan]["date"].max(), "partial",
+            "real where recorded, estimated elsewhere")
+    else:
+        row("Option prices", "implied volatility", None, "estimated", "estimated from recent price swings; no option price history")
+    from .config import DATA_DIR
+    mp = DATA_DIR / "macro_raw.parquet"
+    if mp.exists():
+        m = pd.read_parquet(mp).dropna(how="all")
+        row("Rates, volatility, political risk", "FRED, policy-uncertainty and geopolitical-risk indexes",
+            m[m.index < scan].index.max(), "context", "shown as context; not used to rank stocks")
+    rel = DATA_DIR / "sofo_relationships.parquet"
+    row("Competitor links", "Sofo World competitor / customer / supplier graph" if rel.exists() else "SEC industry codes and price co-movement",
+        known, "ok" if rel.exists() else "partial", "" if rel.exists() else "Sofo World graph not connected: using industry and co-movement peers")
+    return out
+
+
 def final_model(panel, features, cal_slope, max_rows: int = 3_000_000):
     last = panel.index.get_level_values("date").max()
     keep = [c for c in panel.columns if c in set(features) | {"z_oc", "y_dir", "r_oc", "sig_d"}]
@@ -250,6 +300,7 @@ def run(scan_only: bool = False, reuse: bool = False):
         ticker_profiles(panel, sig, trades, tables, model, acc_detail)
 
     brief = run_scan(panel, tables, model)
+    brief["data_used"] = data_used(tables, brief["scan_date"])
     _write("brief.json", brief)
     dates = panel.index.get_level_values("date").unique()
     _write("meta.json", dict(source=source, generated_at=datetime.now(timezone.utc).isoformat(),

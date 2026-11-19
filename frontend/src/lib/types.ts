@@ -34,7 +34,9 @@ export interface Idea {
   option?: { contract: string; premium: number; ev: number; p_profit: number; worth_it: boolean; contracts: number };
   outcome?: { stock_move: number; rel_move: number; correct: boolean; trade_ret: number };
 }
+export interface DataUsed { source: string; what: string; through: string | null; status: "ok" | "missing" | "stale" | "estimated" | "partial" | "context"; note: string }
 export interface Brief {
+  data_used?: DataUsed[];
   world?: World; longs?: Idea[]; shorts?: Idea[]; book?: { per_position: number; positions: number };
   scan_date: string; generated_for: string; equity: number; universe_size: number; scanned: number;
   market: { premarket_gap: number; news_items: number; regime_vol: number; cal_slope: number };
