@@ -11,14 +11,14 @@ import { compact, MONTHS, num, pct, tone, usd } from "../lib/format";
 import type { Ablation, Backtest as BT, Research } from "../lib/types";
 
 const STRATS = {
-  swing_5d: { col: "swing", name: "Swing 5-day long/short", color: "#2ee6a6", desc: "Each day buy the 25 strongest and short the 25 weakest liquid names by the 5-session model; hold 5 sessions. 1× long, 1× short." },
-  stock_daytrade: { col: "stock", name: "Day-trade long/short", color: "#4cc3ff", desc: "Each day long the 25 strongest and short the 25 weakest by the 1-day model, open to close. 1× long, 1× short." },
-  options_daytrade: { col: "options", name: "Options day trade", color: "#8b7bff", desc: "Weekly calls/puts bought at the open, sold at the close. Quarter-Kelly, ≤2% premium per trade, ≤8% per day." },
-  earnings_straddle: { col: "straddle", name: "Earnings straddle", color: "#ffb547", desc: "Buy the straddle at the close before a report when the ticker's own history of moves beats the implied move by 15%+." },
+  swing_5d: { col: "swing", name: "Swing 5-day long/short", color: "var(--color-up)", desc: "Each day buy the 25 strongest and short the 25 weakest liquid names by the 5-session model; hold 5 sessions. 1× long, 1× short." },
+  stock_daytrade: { col: "stock", name: "Day-trade long/short", color: "var(--color-sky)", desc: "Each day long the 25 strongest and short the 25 weakest by the 1-day model, open to close. 1× long, 1× short." },
+  options_daytrade: { col: "options", name: "Options day trade", color: "var(--color-accent)", desc: "Weekly calls/puts bought at the open, sold at the close. Quarter-Kelly, ≤2% premium per trade, ≤8% per day." },
+  earnings_straddle: { col: "straddle", name: "Earnings straddle", color: "var(--color-amber)", desc: "Buy the straddle at the close before a report when the ticker's own history of moves beats the implied move by 15%+." },
 } as const;
 type K = keyof typeof STRATS;
 
-export default function Backtest() {
+export default function Performance() {
   const { data, error } = useApi<BT>("backtest");
   const [k, setK] = useState<K>("stock_daytrade");
   const { data: research } = useApi<Research>("research");
@@ -40,19 +40,46 @@ export default function Backtest() {
   const trades = data.trades.filter((t) => t.strategy === k).slice(-60).reverse();
   return (
     <div>
-      <PageHeader title="Backtest Lab"
-        sub={`Walk-forward, out-of-sample only · ${data.period.start} → ${data.period.end} · ${data.period.days} sessions · monthly refit, 1-day embargo · costs and spreads included`}
-        right={<Tabs value={k} onChange={setK} items={(Object.keys(STRATS) as K[]).map((v) => ({ v, label: STRATS[v].name }))} />} />
+      <PageHeader title="Performance"
+        sub={`What each way of trading the model would have earned from ${data.period.start} to ${data.period.end}, on days the model had never seen, after trading costs.`} />
+
+      <section className="card overflow-hidden">
+        <table className="w-full text-[14px]">
+          <thead><tr className="text-left text-[13.5px] text-ink-400">
+            <th className="px-5 py-3 font-medium">Strategy</th><th className="font-medium">Verdict</th>
+            <th className="px-3 text-right font-medium">Per year</th><th className="px-3 text-right font-medium">Worst drop</th>
+            <th className="px-3 text-right font-medium" title="Sharpe ratio: return per unit of risk. Above 1 is good.">Return for risk</th>
+            <th className="px-5 text-right font-medium" title="Chance the edge is real after correcting for the number of variants tried (deflated Sharpe). 95% is the usual bar.">Chance the edge is real</th>
+          </tr></thead>
+          <tbody>{(Object.keys(STRATS) as K[]).filter((x) => data.strategies[x]).map((x) => {
+            const r = data.strategies[x]; const d = r.robustness?.dsr; const traded = (r.trades ?? 0) > 0;
+            const verdict = !traded ? { c: "ink" as const, t: "Not tested yet" } : d != null && d >= 0.95 ? { c: "up" as const, t: "Works" }
+              : r.cagr > 0 && d != null && d >= 0.5 ? { c: "amber" as const, t: "Promising" } : r.cagr > 0 ? { c: "amber" as const, t: "Unproven" } : { c: "down" as const, t: "Loses money" };
+            return (
+              <tr key={x} onClick={() => setK(x)} className={clsx("cursor-pointer border-t border-ink-700 hover:bg-ink-800", k === x && "bg-ink-800")}>
+                <td className="px-5 py-3"><span className="font-semibold text-ink-100">{STRATS[x].name}</span><div className="max-w-[60ch] text-[13px] text-ink-400">{STRATS[x].desc}</div></td>
+                <td><Pill color={verdict.c}>{verdict.t}</Pill></td>
+                <td className={clsx("num px-3 text-right", traded ? tone(r.cagr) : "text-ink-500")}>{traded ? pct(r.cagr, 0) : "–"}</td>
+                <td className="num px-3 text-right">{traded ? pct(r.max_drawdown, 0) : "–"}</td>
+                <td className="num px-3 text-right">{traded ? num(r.sharpe, 2) : "–"}</td>
+                <td className="num px-5 text-right">{d == null ? "–" : pct(d, 0, false)}</td>
+              </tr>);
+          })}</tbody>
+        </table>
+      </section>
+      <p className="mb-4 mt-2 text-[13px] text-ink-400">Click a strategy to see its detail below.</p>
 
       {!!data.data_notes?.length && (
-        <div className="mb-4 space-y-2">
-          {data.data_notes.map((n, i) => (
-            <div key={i} className={clsx("card flex items-start gap-3 px-4 py-2.5 text-[12.5px]",
-              n.level === "warn" ? "border-amber/35 text-ink-200" : "text-ink-400")}>
-              <span className={clsx("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", n.level === "warn" ? "bg-amber" : "bg-ink-500")} />
-              {n.text}
-            </div>))}
-        </div>)}
+        <details className="mb-4">
+          <summary className="card flex items-center gap-3 px-4 py-2.5 text-[13.5px] text-ink-300 hover:border-ink-600">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber" />
+            {data.data_notes.length} things limit these results: {data.data_notes.filter((n) => n.level === "warn").length} data gaps and {data.data_notes.filter((n) => n.level !== "warn").length} caveats
+            <span className="ml-auto text-ink-400">show</span>
+          </summary>
+          <ul className="card mt-2 space-y-2 px-5 py-4 text-[13.5px] text-ink-300">
+            {data.data_notes.map((n, i) => <li key={i} className="flex gap-2.5"><span className={clsx("mt-2 h-1.5 w-1.5 shrink-0 rounded-full", n.level === "warn" ? "bg-amber" : "bg-ink-500")} />{n.text}</li>)}
+          </ul>
+        </details>)}
       {k === "earnings_straddle" && !s.trades && (
         <div className="card mb-4 px-5 py-4 text-[13px] text-ink-300">No straddle trades: this strategy needs historical options prices to be measured.</div>)}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-8">
@@ -71,7 +98,7 @@ export default function Backtest() {
       </div>
 
       <Card className="mt-4" title={<span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ background: STRATS[k].color }} />Equity curve: {STRATS[k].name}</span>}
-        right={<div className="flex items-center gap-3"><span className="hidden text-[11.5px] text-ink-500 lg:block">{STRATS[k].desc}</span>
+        right={<div className="flex items-center gap-3"><span className="hidden text-[12.5px] text-ink-500 lg:block">{STRATS[k].desc}</span>
           <Tabs value={log ? "log" : "lin"} onChange={(v) => setLog(v === "log")} items={[{ v: "lin", label: "Linear" }, { v: "log", label: "Log" }]} /></div>}>
         <div className="h-[320px]">
           <ResponsiveContainer>
@@ -81,7 +108,7 @@ export default function Backtest() {
               <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={60} />
               <YAxis scale={log ? "log" : "auto"} domain={["auto", "auto"]} tickFormatter={(v) => compact(v, "$")} tickLine={false} axisLine={false} width={60} />
               <Tooltip {...chartTooltip} formatter={(v: number) => [usd(v), "Equity"]} />
-              <ReferenceLine y={data.risk.starting_capital} stroke="#3a4560" strokeDasharray="4 4" />
+              <ReferenceLine y={data.risk.starting_capital} stroke="var(--color-ink-500)" strokeDasharray="4 4" />
               <Area type="monotone" dataKey="v" stroke={STRATS[k].color} strokeWidth={2} fill="url(#eq)" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
@@ -92,7 +119,7 @@ export default function Backtest() {
               <XAxis dataKey="date" hide />
               <YAxis tickFormatter={(v) => pct(v, 0)} tickLine={false} axisLine={false} width={60} />
               <Tooltip {...chartTooltip} formatter={(v: number) => [pct(v, 1), "Drawdown"]} />
-              <Area type="monotone" dataKey="dd" stroke="#ff5c7a" fill="#ff5c7a" fillOpacity={0.15} strokeWidth={1.2} />
+              <Area type="monotone" dataKey="dd" stroke="var(--color-down)" fill="var(--color-down)" fillOpacity={0.15} strokeWidth={1.2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -108,17 +135,21 @@ export default function Backtest() {
                 <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={80} />
                 <YAxis scale="log" domain={["auto", "auto"]} tickFormatter={(v) => compact(v, "$")} tickLine={false} axisLine={false} width={52} />
                 <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [usd(v), n]} />
-                <Line dataKey="swing" stroke="#2ee6a6" dot={false} strokeWidth={1.6} name="Swing 5d" />
-                <Line dataKey="stock" stroke="#4cc3ff" dot={false} strokeWidth={1.6} name="Day L/S" />
-                <Line dataKey="options" stroke="#8b7bff" dot={false} strokeWidth={1.6} name="Options" />
-                <Line dataKey="straddle" stroke="#ffb547" dot={false} strokeWidth={1.6} name="Straddles" />
+                <Line dataKey="swing" stroke="var(--color-up)" dot={false} strokeWidth={1.6} name="Swing 5d" />
+                <Line dataKey="stock" stroke="var(--color-sky)" dot={false} strokeWidth={1.6} name="Day L/S" />
+                <Line dataKey="options" stroke="var(--color-accent)" dot={false} strokeWidth={1.6} name="Options" />
+                <Line dataKey="straddle" stroke="var(--color-amber)" dot={false} strokeWidth={1.6} name="Straddles" />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </Card>
       </div>
 
-      <h2 className="mb-3 mt-8 text-[16px] font-semibold">Is the signal real?</h2>
+      <details className="mt-6">
+        <summary className="card flex items-center justify-between px-5 py-3.5 text-[15px] font-semibold text-ink-100 hover:border-ink-600">
+          Evidence and method: signal quality, model comparison, trade log, assumptions <span className="text-[13px] font-normal text-ink-400">show</span>
+        </summary>
+      <h2 className="mb-3 mt-6 text-[16px] font-semibold text-ink-100">Is the signal real?</h2>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
         <Stat label="Information coeff." value={num(sig.ic.ic_mean, 3)} sub="daily rank corr. with open→close" hint="0.02-0.05 is a strong daily equity signal" />
         <Stat label="IC t-stat (ann.)" value={num(sig.ic.ic_ir, 1)} sub="IC mean / std × √252" />
@@ -127,7 +158,7 @@ export default function Backtest() {
         <Stat label="Calibration slope" value={num(data.model.cal_slope, 2)} sub="raw → honest shrink" />
       </div>
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card title="Return by signal decile" right={<span className="text-[11px] text-ink-500">avg open→close, bps</span>}>
+        <Card title="Return by signal decile" right={<span className="text-[12.5px] text-ink-500">avg open→close, bps</span>}>
           <div className="h-[230px]">
             <ResponsiveContainer>
               <BarChart data={sig.deciles} margin={{ left: -8 }}>
@@ -135,13 +166,13 @@ export default function Backtest() {
                 <XAxis dataKey="decile" tickLine={false} axisLine={false} />
                 <YAxis tickLine={false} axisLine={false} />
                 <Tooltip {...chartTooltip} formatter={(v: number) => [`${v.toFixed(1)} bps`, "avg return"]} labelFormatter={(l) => `Decile ${l}`} />
-                <ReferenceLine y={0} stroke="#3a4560" />
-                <Bar dataKey="ret_bps" radius={[4, 4, 0, 0]}>{sig.deciles.map((d) => <Cell key={d.decile} fill={d.ret_bps >= 0 ? "#2ee6a6" : "#ff5c7a"} fillOpacity={0.35 + Math.abs(d.decile - 5.5) / 8} />)}</Bar>
+                <ReferenceLine y={0} stroke="var(--color-ink-500)" />
+                <Bar dataKey="ret_bps" radius={[4, 4, 0, 0]}>{sig.deciles.map((d) => <Cell key={d.decile} fill={d.ret_bps >= 0 ? "var(--color-up)" : "var(--color-down)"} fillOpacity={0.35 + Math.abs(d.decile - 5.5) / 8} />)}</Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Card>
-        <Card title="Calibration" right={<span className="text-[11px] text-ink-500">predicted vs realised P(up)</span>}>
+        <Card title="Calibration" right={<span className="text-[12.5px] text-ink-500">predicted vs realised P(up)</span>}>
           <div className="h-[230px]">
             <ResponsiveContainer>
               <ComposedChart data={sig.calibration} margin={{ left: -8 }}>
@@ -149,16 +180,16 @@ export default function Backtest() {
                 <XAxis dataKey="pred" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => pct(v, 0, false)} tickLine={false} axisLine={false} />
                 <YAxis domain={[0.4, 0.6]} tickFormatter={(v) => pct(v, 0, false)} tickLine={false} axisLine={false} />
                 <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [n === "n" ? v : pct(v, 1, false), n]} />
-                <Line dataKey="pred" stroke="#3a4560" strokeDasharray="4 4" dot={false} name="perfect" />
-                <Scatter dataKey="actual" fill="#8b7bff" name="actual" />
+                <Line dataKey="pred" stroke="var(--color-ink-500)" strokeDasharray="4 4" dot={false} name="perfect" />
+                <Scatter dataKey="actual" fill="var(--color-accent)" name="actual" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
         </Card>
-        <Card title="Feature importance" right={<span className="text-[11px] text-ink-500">nonlinear model, gain share</span>}>
+        <Card title="Feature importance" right={<span className="text-[12.5px] text-ink-500">nonlinear model, gain share</span>}>
           <div className="space-y-1.5">
             {data.model.importances.slice(0, 11).map((f) => (
-              <div key={f.feature} className="grid grid-cols-[1fr_110px_44px] items-center gap-2 text-[12px]">
+              <div key={f.feature} className="grid grid-cols-[1fr_110px_44px] items-center gap-2 text-[13px]">
                 <span className="num truncate text-ink-300">{f.feature}</span>
                 <div className="h-1.5 rounded-full bg-ink-800"><div className="h-full rounded-full bg-gradient-to-r from-accent to-sky" style={{ width: `${(f.importance / data.model.importances[0].importance) * 100}%` }} /></div>
                 <span className="num text-right text-ink-400">{pct(f.importance, 1, false)}</span>
@@ -172,26 +203,26 @@ export default function Backtest() {
       <AblationCard />
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card title="Per-ticker model skill" right={<span className="text-[11px] text-ink-500">out-of-sample IC by ticker</span>}>
+        <Card title="Per-ticker model skill" right={<span className="text-[12.5px] text-ink-500">out-of-sample IC by ticker</span>}>
           <div className="h-[150px]">
             <ResponsiveContainer>
               <BarChart data={data.ticker_ic.dist.map((c, i) => ({ c, x: (data.ticker_ic.edges[i] + data.ticker_ic.edges[i + 1]) / 2 }))} margin={{ left: -20 }}>
                 <XAxis dataKey="x" tickFormatter={(v) => v.toFixed(2)} tickLine={false} axisLine={false} />
                 <YAxis tickLine={false} axisLine={false} />
                 <Tooltip {...chartTooltip} formatter={(v: number) => [v, "tickers"]} labelFormatter={(l) => `IC ≈ ${Number(l).toFixed(3)}`} />
-                <ReferenceLine x={0} stroke="#5d6a88" />
-                <Bar dataKey="c">{data.ticker_ic.dist.map((_, i) => <Cell key={i} fill={data.ticker_ic.edges[i] >= 0 ? "#2ee6a6" : "#ff5c7a"} fillOpacity={0.6} />)}</Bar>
+                <ReferenceLine x={0} stroke="var(--color-ink-400)" />
+                <Bar dataKey="c">{data.ticker_ic.dist.map((_, i) => <Cell key={i} fill={data.ticker_ic.edges[i] >= 0 ? "var(--color-up)" : "var(--color-down)"} fillOpacity={0.6} />)}</Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3 text-[12px]">
+          <div className="mt-3 grid grid-cols-2 gap-3 text-[13px]">
             <div><div className="label mb-1">Most predictable</div>{data.ticker_ic.best.filter((t) => t.ic != null).slice(0, 5).map((t) => <Link key={t.ticker} to={`/t/${t.ticker}`} className="flex justify-between py-0.5 hover:text-accent"><span>{t.ticker}</span><span className="num text-up">{t.ic.toFixed(3)}</span></Link>)}</div>
             <div><div className="label mb-1">Least predictable</div>{data.ticker_ic.worst.filter((t) => t.ic != null).slice(0, 5).map((t) => <Link key={t.ticker} to={`/t/${t.ticker}`} className="flex justify-between py-0.5 hover:text-accent"><span>{t.ticker}</span><span className="num text-down">{t.ic.toFixed(3)}</span></Link>)}</div>
           </div>
         </Card>
         <Card title="Recent trades" className="xl:col-span-2" pad={false}>
           <div className="max-h-[330px] overflow-auto px-5 pb-4">
-            <table className="w-full text-[12px]">
+            <table className="w-full text-[13px]">
               <thead className="sticky top-0 bg-ink-900"><tr className="text-left text-ink-500">
                 <th className="py-2 font-medium">Date</th><th className="font-medium">Ticker</th><th className="font-medium">Side</th>
                 <th className="font-medium">Conf</th><th className="font-medium">Model EV</th><th className="font-medium">Stock move</th>
@@ -213,13 +244,14 @@ export default function Backtest() {
       </div>
 
       <Card className="mt-4" title="Assumptions">
-        <div className="grid grid-cols-2 gap-4 text-[12px] text-ink-300 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 text-[13px] text-ink-300 md:grid-cols-4">
           <div><div className="label mb-1">Entry / exit</div>Signals use only data published before 09:00 ET. Fills at the official open and close.</div>
           <div><div className="label mb-1">Options pricing</div>Black-Scholes on front-week IV. Open IV marked up with the size of the premarket gap. One session of theta. Post-earnings IV crush.</div>
           <div><div className="label mb-1">Costs</div>Cross half the bid-ask each side, ${data.costs.option_commission_per_contract}/contract, {data.costs.stock_slippage_bps} bps stock slippage per side.</div>
           <div><div className="label mb-1">Risk</div>¼ Kelly, ≤{pct(data.risk.max_risk_per_trade, 0, false)} premium per trade, ≤{pct(data.risk.max_daily_risk, 0, false)} per day, size halved after a −{pct(data.risk.daily_loss_stop, 0, false)} day.</div>
         </div>
       </Card>
+      </details>
     </div>
   );
 }
@@ -229,7 +261,7 @@ function MonthGrid({ m }: { m: { year: number; month: number; ret: number }[] })
   const get = (y: number, mo: number) => m.find((x) => x.year === y && x.month === mo)?.ret;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-[11.5px]">
+      <table className="w-full text-[12.5px]">
         <thead><tr className="text-ink-500"><th className="w-12 text-left font-medium" />{MONTHS.map((x) => <th key={x} className="font-medium">{x}</th>)}<th className="font-medium">Year</th></tr></thead>
         <tbody>{years.map((y) => {
           const yr = m.filter((x) => x.year === y).reduce((a, b) => a * (1 + b.ret), 1) - 1;
@@ -240,7 +272,7 @@ function MonthGrid({ m }: { m: { year: number; month: number; ret: number }[] })
                 const v = get(y, i + 1);
                 const a = v == null ? 0 : Math.min(1, Math.abs(v) / 0.12);
                 return <td key={i} className="p-0.5"><div className="num rounded-md py-1.5 text-center"
-                  style={{ background: v == null ? "transparent" : v >= 0 ? `rgba(46,230,166,${0.08 + a * 0.5})` : `rgba(255,92,122,${0.08 + a * 0.5})`, color: v == null ? "#283044" : "#e3e8f4" }}>
+                  style={{ background: v == null ? "transparent" : v >= 0 ? `color-mix(in srgb, var(--color-up) ${Math.round((0.08 + a * 0.5) * 100)}%, transparent)` : `color-mix(in srgb, var(--color-down) ${Math.round((0.08 + a * 0.5) * 100)}%, transparent)`, color: v == null ? "var(--color-ink-600)" : "var(--color-ink-100)" }}>
                   {v == null ? "·" : pct(v, 1)}</div></td>;
               })}
               <td className={clsx("num px-2 text-right font-semibold", tone(yr))}>{pct(yr, 0)}</td>
@@ -259,9 +291,9 @@ function AblationCard() {
   const mm = data.market_model;
   return (
     <Card className="mt-4" title="What actually predicts next-session direction"
-      right={<span className="text-[11px] text-ink-500">holdout from {data.split}; groups added one at a time</span>}>
+      right={<span className="text-[12.5px] text-ink-500">holdout from {data.split}; groups added one at a time</span>}>
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
-        <table className="w-full text-[12.5px]">
+        <table className="w-full text-[13.5px]">
           <thead><tr className="text-left text-ink-500">
             <th className="py-1.5 font-medium">Target</th><th className="font-medium">Feature group added</th>
             <th className="font-medium text-right">IC</th><th className="font-medium text-right">t-stat</th>
@@ -276,11 +308,11 @@ function AblationCard() {
                 <td className="num text-right">{num(r.ic_t, 1)}</td>
                 <td className={clsx("num text-right", r.spread_bps === best && "font-semibold text-accent")}>{num(r.spread_bps, 1)} bps</td>
                 <td className="num text-right">{pct(r.hit_top, 1, false)}</td>
-                <td className="num truncate pl-4 text-[11px] text-ink-500">{(r.top_new ?? []).join(", ")}</td></>)}
+                <td className="num truncate pl-4 text-[12.5px] text-ink-500">{(r.top_new ?? []).join(", ")}</td></>)}
             </tr>))}</tbody>
         </table>
         {mm && (
-          <div className="rounded-xl border border-ink-800 bg-ink-950/40 p-4 text-[12.5px]">
+          <div className="rounded-xl border border-ink-800 bg-ink-950/40 p-4 text-[13.5px]">
             <div className="label mb-2">Market direction from the political world</div>
             <div className="num text-[22px] font-semibold">{pct(mm.gbm.hit, 1, false)}</div>
             <div className="text-ink-400">days called right, vs {pct(1 - mm.gbm.base_up_rate, 1, false)} for "always down" and {pct(mm.gbm.base_up_rate, 1, false)} for "always up", over {mm.gbm.days} sessions. Sharpe {num(mm.gbm.sharpe, 2)}.</div>
@@ -295,8 +327,8 @@ function ResearchCard({ r }: { r: Research }) {
   const best = Math.max(...r.variants.map((v) => v.sharpe));
   return (
     <Card className="mt-4" title="Research holdout: which model design holds up"
-      right={<span className="text-[11px] text-ink-500">trained before {r.split} with a {r.purge_sessions}-session purge · {r.book} · {r.cost_bps_round_trip} bps round trip · see docs/RESEARCH.md</span>}>
-      <table className="w-full text-[12.5px]">
+      right={<span className="text-[12.5px] text-ink-500">trained before {r.split} with a {r.purge_sessions}-session purge · {r.book} · {r.cost_bps_round_trip} bps round trip · see docs/RESEARCH.md</span>}>
+      <table className="w-full text-[13.5px]">
         <thead><tr className="text-left text-ink-500">
           <th className="py-1.5 font-medium">Variant</th><th className="font-medium text-right">Hold</th><th className="font-medium text-right">IC</th>
           <th className="font-medium text-right" title="t > 3 is the bar suggested by Harvey, Liu and Zhu (2016)">t-stat</th>
@@ -313,7 +345,7 @@ function ResearchCard({ r }: { r: Research }) {
             <td className={clsx("num text-right", tone(v.net_ann))}>{pct(v.net_ann, 0)}</td>
             <td className={clsx("num text-right", v.sharpe === best && "font-semibold text-accent")}>{num(v.sharpe, 2)}</td>
             <td className="num text-right">{pct(v.hit_long, 1, false)} / {pct(v.hit_short, 1, false)}</td>
-            <td className="num pl-4 text-[11.5px]">{Object.entries(v.by_year).map(([y, b]) => <span key={y} className={clsx("mr-3", tone(b))}>{y}: {num(b, 1)}</span>)}</td>
+            <td className="num pl-4 text-[12.5px]">{Object.entries(v.by_year).map(([y, b]) => <span key={y} className={clsx("mr-3", tone(b))}>{y}: {num(b, 1)}</span>)}</td>
           </tr>))}</tbody>
       </table>
     </Card>

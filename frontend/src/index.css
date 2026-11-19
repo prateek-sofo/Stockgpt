@@ -1,48 +1,70 @@
 @import "tailwindcss";
 
+/* Layout idea: a calm research desk. One top bar, wide content, answers first and evidence one click away.
+   The ink scale is semantic: 950 page, 900 surface, 850 raised, 800 hover, 700 hairline, 600 border,
+   500 faint text, 400 muted text, 300 secondary text, 200 body text, 100 headings. */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --color-ink-950: #07080c;
-  --color-ink-900: #0b0d13;
-  --color-ink-850: #0f121a;
-  --color-ink-800: #141823;
-  --color-ink-700: #1c2130;
-  --color-ink-600: #283044;
-  --color-ink-500: #3a4560;
-  --color-ink-400: #5d6a88;
-  --color-ink-300: #8a96b3;
-  --color-ink-200: #b9c2d8;
-  --color-ink-100: #e3e8f4;
-  --color-up: #2ee6a6;
-  --color-down: #ff5c7a;
-  --color-accent: #8b7bff;
-  --color-amber: #ffb547;
-  --color-sky: #4cc3ff;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --color-ink-950: #f6f7f9;
+  --color-ink-900: #ffffff;
+  --color-ink-850: #f9fafb;
+  --color-ink-800: #f0f2f5;
+  --color-ink-700: #e4e7ec;
+  --color-ink-600: #d0d5dd;
+  --color-ink-500: #98a2b3;
+  --color-ink-400: #667085;
+  --color-ink-300: #475467;
+  --color-ink-200: #344054;
+  --color-ink-100: #101828;
+  --color-up: #0b8a5f;
+  --color-down: #d6304a;
+  --color-accent: #2f5bea;
+  --color-amber: #b26a00;
+  --color-sky: #0b7fc2;
+}
+
+:root { color-scheme: light; --shadow-card: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06); }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-ink-950: #0b0e14; --color-ink-900: #121722; --color-ink-850: #161c29; --color-ink-800: #1b2231;
+    --color-ink-700: #242c3d; --color-ink-600: #323c52; --color-ink-500: #5b6781; --color-ink-400: #8491ab;
+    --color-ink-300: #a9b4c9; --color-ink-200: #cbd3e3; --color-ink-100: #f2f5fa;
+    --color-up: #34d399; --color-down: #fb7185; --color-accent: #7ea2ff; --color-amber: #f5b547; --color-sky: #4cc3f5;
+    --shadow-card: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ink-950: #0b0e14; --color-ink-900: #121722; --color-ink-850: #161c29; --color-ink-800: #1b2231;
+  --color-ink-700: #242c3d; --color-ink-600: #323c52; --color-ink-500: #5b6781; --color-ink-400: #8491ab;
+  --color-ink-300: #a9b4c9; --color-ink-200: #cbd3e3; --color-ink-100: #f2f5fa;
+  --color-up: #34d399; --color-down: #fb7185; --color-accent: #7ea2ff; --color-amber: #f5b547; --color-sky: #4cc3f5;
+  --shadow-card: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px -16px rgba(0,0,0,.7);
 }
 
 html, body, #root { height: 100%; }
-body {
-  @apply bg-ink-950 text-ink-100 font-sans antialiased;
-  background-image:
-    radial-gradient(1200px 600px at 10% -10%, rgba(139,123,255,0.10), transparent 60%),
-    radial-gradient(900px 500px at 100% 0%, rgba(46,230,166,0.06), transparent 60%);
-  background-attachment: fixed;
-}
-.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.card {
-  @apply rounded-2xl border border-ink-700/70 bg-ink-900/70 backdrop-blur-sm;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 10px 30px -15px rgba(0,0,0,0.6);
-}
-.card-hover { @apply transition duration-200 hover:border-ink-500 hover:bg-ink-850/80; }
-.label { @apply text-[11px] uppercase tracking-[0.08em] text-ink-400 font-medium; }
-.chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium; }
+html { font-size: 15px; }
+body { @apply bg-ink-950 text-ink-200 font-sans antialiased; }
+h1, h2, h3 { text-wrap: balance; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.card { @apply rounded-2xl border border-ink-700 bg-ink-900; box-shadow: var(--shadow-card); }
+.card-hover { @apply transition duration-150 hover:border-ink-600; }
+.label { @apply text-[11.5px] font-medium uppercase tracking-[0.06em] text-ink-400; }
+.chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-medium whitespace-nowrap; }
+.row-btn { @apply w-full cursor-pointer text-left transition hover:bg-ink-800 focus-visible:outline-2 focus-visible:outline-accent; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 6px; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #283044; border-radius: 10px; border: 2px solid #0b0d13; }
+::-webkit-scrollbar-thumb { background: var(--color-ink-600); border-radius: 10px; border: 2px solid var(--color-ink-900); }
 ::-webkit-scrollbar-track { background: transparent; }
-.recharts-cartesian-grid line { stroke: #1c2130; }
-.recharts-text { fill: #5d6a88; font-size: 11px; }
-.fade-in { animation: fade .35s ease both; }
-@keyframes fade { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none; } }
-.shimmer { background: linear-gradient(90deg, #141823 0%, #1c2130 50%, #141823 100%); background-size: 200% 100%; animation: sh 1.2s infinite; }
+.recharts-cartesian-grid line { stroke: var(--color-ink-700); }
+.recharts-text { fill: var(--color-ink-400); font-size: 11.5px; }
+.fade-in { animation: fade .25s ease both; }
+@keyframes fade { from { opacity: .4; transform: translateY(3px);} to { opacity: 1; transform: none; } }
+.shimmer { background: linear-gradient(90deg, var(--color-ink-800) 0%, var(--color-ink-700) 50%, var(--color-ink-800) 100%); background-size: 200% 100%; animation: sh 1.2s infinite; }
 @keyframes sh { from { background-position: 200% 0 } to { background-position: -200% 0 } }
+details > summary { cursor: pointer; list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+@media (prefers-reduced-motion: reduce) { .fade-in, .shimmer { animation: none; } }

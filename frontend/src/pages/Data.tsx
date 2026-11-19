@@ -51,17 +51,17 @@ export default function Data() {
             <dt className="text-ink-400">Runtime</dt><dd className="num">{data.runtime_sec}s</dd>
           </dl>
           <div className={STATIC ? "hidden" : "mt-5 flex gap-2"}>
-            <button onClick={() => run("scan")} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[12.5px] font-semibold text-ink-950 hover:brightness-110"><Play className="h-3.5 w-3.5" />Morning scan</button>
-            <button onClick={() => run("full")} className="flex items-center gap-2 rounded-xl border border-ink-700 px-3.5 py-2 text-[12.5px] font-medium text-ink-200 hover:border-ink-500"><Cpu className="h-3.5 w-3.5" />Retrain + backtest</button>
+            <button onClick={() => run("scan")} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13.5px] font-semibold text-white hover:brightness-110"><Play className="h-3.5 w-3.5" />Morning scan</button>
+            <button onClick={() => run("full")} className="flex items-center gap-2 rounded-xl border border-ink-700 px-3.5 py-2 text-[13.5px] font-medium text-ink-200 hover:border-ink-500"><Cpu className="h-3.5 w-3.5" />Retrain + backtest</button>
           </div>
-          {msg && <div className="num mt-3 text-[11.5px] text-ink-400">{msg}</div>}
+          {msg && <div className="num mt-3 text-[12.5px] text-ink-400">{msg}</div>}
         </Card>
         <Card className="xl:col-span-2" title={<span className="flex items-center gap-2"><FileJson className="h-4 w-4 text-accent" />Data contract: drop parquet or CSV into data/raw/</span>}>
           <div className="divide-y divide-ink-800">
             {TABLES.map((t) => (
-              <div key={t.n} className="grid grid-cols-[110px_1fr] gap-3 py-2.5 text-[12.5px]">
+              <div key={t.n} className="grid grid-cols-[110px_1fr] gap-3 py-2.5 text-[13.5px]">
                 <code className="num font-semibold text-accent">{t.n}</code>
-                <div><div className="num text-ink-200">{t.cols}</div><div className="mt-0.5 text-[11.5px] text-ink-500">{t.note}</div></div>
+                <div><div className="num text-ink-200">{t.cols}</div><div className="mt-0.5 text-[12.5px] text-ink-500">{t.note}</div></div>
               </div>))}
           </div>
         </Card>
@@ -70,9 +70,9 @@ export default function Data() {
         <ol className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           {STEPS.map((s, i) => (
             <li key={s.t} className="rounded-xl border border-ink-800 bg-ink-950/40 p-4">
-              <div className="num text-[11px] text-accent">0{i + 1}</div>
+              <div className="num text-[12.5px] text-accent">0{i + 1}</div>
               <div className="mt-1 text-[13px] font-semibold">{s.t}</div>
-              <div className="mt-1.5 text-[12px] leading-relaxed text-ink-400">{s.d}</div>
+              <div className="mt-1.5 text-[13px] leading-relaxed text-ink-400">{s.d}</div>
             </li>))}
         </ol>
       </Card>

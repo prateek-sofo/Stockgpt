@@ -24,7 +24,7 @@ export default function Ticker() {
   const news = data.news.filter((n) => newsFilter === "all" || n.m >= 0.4);
   return (
     <div>
-      <Link to="/universe" className="mb-3 inline-flex items-center gap-1 text-[12px] text-ink-400 hover:text-ink-200"><ArrowLeft className="h-3.5 w-3.5" />Universe</Link>
+      <Link to="/stocks" className="mb-3 inline-flex items-center gap-1 text-[13.5px] text-ink-400 hover:text-ink-100"><ArrowLeft className="h-3.5 w-3.5" />Stocks</Link>
       <PageHeader
         title={<span className="flex items-center gap-3">{data.ticker}<span className="text-[15px] font-normal text-ink-400">{data.name}</span>
           {data.liquid ? <Pill color="up">liquid</Pill> : <Pill>illiquid</Pill>}
@@ -50,7 +50,7 @@ export default function Ticker() {
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2" title={<span className="flex items-center gap-2"><Brain className="h-4 w-4 text-accent" />{data.ticker}'s own model</span>}
-          right={<span className="text-[11px] text-ink-500">effective coefficient = market + this ticker's shrunk trait</span>}>
+          right={<span className="text-[12.5px] text-ink-500">effective coefficient = market + this ticker's shrunk trait</span>}>
           <div className="grid gap-3 md:grid-cols-2">
             {traitRows.map(([k, m]) => {
               const L = TRAIT_LABEL[k];
@@ -61,11 +61,11 @@ export default function Ticker() {
                 <div key={k} className="rounded-xl border border-ink-800 bg-ink-950/40 p-4">
                   <div className="flex items-center justify-between">
                     <span className="text-[13px] font-semibold">{L?.name ?? k}</span>
-                    <span className="num text-[11px] text-ink-500">{pct(conf, 0, false)} own data</span>
+                    <span className="num text-[12.5px] text-ink-500">{pct(conf, 0, false)} own data</span>
                   </div>
-                  <div className="mt-1 text-[12px] text-ink-400">{data.ticker} {m.effective >= 0 ? L?.pos : L?.neg}{Math.abs(m.effective) > Math.abs(mkt) * 1.25 ? ", more than the market" : Math.abs(m.effective) < Math.abs(mkt) * 0.75 ? ", less than the market" : ", in line with the market"}.</div>
-                  <div className="mt-3 space-y-2 text-[11px]">
-                    {[{ l: "Market", v: mkt, c: "#5d6a88" }, { l: data.ticker, v: m.effective, c: m.effective >= 0 ? "#2ee6a6" : "#ff5c7a" }].map((b) => (
+                  <div className="mt-1 text-[13px] text-ink-400">{data.ticker} {m.effective >= 0 ? L?.pos : L?.neg}{Math.abs(m.effective) > Math.abs(mkt) * 1.25 ? ", more than the market" : Math.abs(m.effective) < Math.abs(mkt) * 0.75 ? ", less than the market" : ", in line with the market"}.</div>
+                  <div className="mt-3 space-y-2 text-[12.5px]">
+                    {[{ l: "Market", v: mkt, c: "var(--color-ink-400)" }, { l: data.ticker, v: m.effective, c: m.effective >= 0 ? "var(--color-up)" : "var(--color-down)" }].map((b) => (
                       <div key={b.l} className="grid grid-cols-[56px_1fr_56px] items-center gap-2">
                         <span className="text-ink-400">{b.l}</span>
                         <div className="relative h-2 rounded-full bg-ink-800"><div className="absolute inset-y-0 w-px bg-ink-500" style={{ left: "50%" }} />
@@ -84,18 +84,18 @@ export default function Ticker() {
                 <XAxis dataKey="d" tickLine={false} axisLine={false} minTickGap={70} />
                 <YAxis tickLine={false} axisLine={false} />
                 <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [v.toFixed(3), TRAIT_LABEL[n]?.name ?? n]} />
-                <Legend formatter={(v) => <span className="text-[11px] text-ink-400">{TRAIT_LABEL[v]?.name ?? v}</span>} />
-                <ReferenceLine y={0} stroke="#3a4560" />
-                <Line dataKey="news_on_wsent" stroke="#8b7bff" dot={false} strokeWidth={1.8} />
-                <Line dataKey="gap_pre_z" stroke="#4cc3ff" dot={false} strokeWidth={1.4} />
-                <Line dataKey="ret_1d_z" stroke="#ffb547" dot={false} strokeWidth={1.4} />
+                <Legend formatter={(v) => <span className="text-[12.5px] text-ink-400">{TRAIT_LABEL[v]?.name ?? v}</span>} />
+                <ReferenceLine y={0} stroke="var(--color-ink-500)" />
+                <Line dataKey="news_on_wsent" stroke="var(--color-accent)" dot={false} strokeWidth={1.8} />
+                <Line dataKey="gap_pre_z" stroke="var(--color-sky)" dot={false} strokeWidth={1.4} />
+                <Line dataKey="ret_1d_z" stroke="var(--color-amber)" dot={false} strokeWidth={1.4} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         </Card>
 
         <Card title={<span className="flex items-center gap-2"><CalendarClock className="h-4 w-4 text-amber" />Earnings: implied vs actual</span>}>
-          {data.earnings.length === 0 ? <div className="py-8 text-center text-[12px] text-ink-500">No earnings history yet.</div> : (<>
+          {data.earnings.length === 0 ? <div className="py-8 text-center text-[13px] text-ink-500">No earnings history yet.</div> : (<>
             <div className="h-[210px]">
               <ResponsiveContainer>
                 <BarChart data={data.earnings.slice(-12)} margin={{ left: -14 }}>
@@ -103,8 +103,8 @@ export default function Ticker() {
                   <XAxis dataKey="d" tickFormatter={(d) => d.slice(2, 7)} tickLine={false} axisLine={false} />
                   <YAxis tickFormatter={(v) => pct(v, 0, false)} tickLine={false} axisLine={false} />
                   <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [pct(v, 1, false), n]} />
-                  <Bar dataKey="implied" fill="#3a4560" radius={[3, 3, 0, 0]} name="implied" />
-                  <Bar dataKey="actual" radius={[3, 3, 0, 0]} name="actual">{data.earnings.slice(-12).map((e, i) => <Cell key={i} fill={e.signed >= 0 ? "#2ee6a6" : "#ff5c7a"} />)}</Bar>
+                  <Bar dataKey="implied" fill="var(--color-ink-500)" radius={[3, 3, 0, 0]} name="implied" />
+                  <Bar dataKey="actual" radius={[3, 3, 0, 0]} name="actual">{data.earnings.slice(-12).map((e, i) => <Cell key={i} fill={e.signed >= 0 ? "var(--color-up)" : "var(--color-down)"} />)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -112,7 +112,7 @@ export default function Ticker() {
               const beat = data.earnings.filter((e) => e.actual > e.implied).length;
               const avgI = data.earnings.reduce((a, e) => a + e.implied, 0) / data.earnings.length;
               const avgA = data.earnings.reduce((a, e) => a + e.actual, 0) / data.earnings.length;
-              return <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
+              return <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[12.5px]">
                 <div><div className="text-ink-500">Avg implied</div><div className="num text-[14px]">{pct(avgI, 1, false)}</div></div>
                 <div><div className="text-ink-500">Avg actual</div><div className="num text-[14px]">{pct(avgA, 1, false)}</div></div>
                 <div><div className="text-ink-500">Beat implied</div><div className={clsx("num text-[14px]", beat / data.earnings.length > 0.5 ? "text-up" : "text-ink-200")}>{beat}/{data.earnings.length}</div></div>
@@ -131,18 +131,18 @@ export default function Ticker() {
                 <SentDot s={n.s} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] leading-snug text-ink-100">{n.h}</div>
-                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-ink-500">
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-[12.5px] text-ink-500">
                     <span className="num">{n.t} ET</span><span>{n.src}</span><span>{n.e}</span>
                     <span>{n.on ? `overnight → ${n.d} open` : `intraday, priced by ${n.d}`}</span>
                   </div>
                 </div>
-                <span className={clsx("num shrink-0 text-[12px]", tone(n.s))}>{n.s > 0 ? "+" : ""}{n.s.toFixed(2)}</span>
+                <span className={clsx("num shrink-0 text-[13px]", tone(n.s))}>{n.s > 0 ? "+" : ""}{n.s.toFixed(2)}</span>
               </div>))}
           </div>
         </Card>
         <Card title="Trading record on this ticker" pad={false}>
           <div className="px-5 pb-4">
-            <div className="mb-3 grid grid-cols-3 gap-2 text-[11px]">
+            <div className="mb-3 grid grid-cols-3 gap-2 text-[12.5px]">
               {Object.entries(perf.trades ?? {}).map(([k, v]) => (
                 <div key={k} className="rounded-lg border border-ink-800 p-2">
                   <div className="truncate text-ink-500">{k.replace("_", " ")}</div>
@@ -151,7 +151,7 @@ export default function Ticker() {
                 </div>))}
             </div>
             <div className="max-h-[300px] overflow-auto">
-              <table className="w-full text-[11.5px]">
+              <table className="w-full text-[12.5px]">
                 <tbody>{(perf.recent_trades ?? []).slice().reverse().map((t, i) => (
                   <tr key={i} className="border-t border-ink-800/70">
                     <td className="num py-1.5 text-ink-400">{t.date}</td>
@@ -159,7 +159,7 @@ export default function Ticker() {
                     <td className={clsx("num text-right", tone(t.ret))}>{pct(t.ret, 1)}</td>
                   </tr>))}</tbody>
               </table>
-              {!(perf.recent_trades ?? []).length && <div className="py-6 text-center text-[12px] text-ink-500">No trades taken on this name.</div>}
+              {!(perf.recent_trades ?? []).length && <div className="py-6 text-center text-[13px] text-ink-500">No trades taken on this name.</div>}
             </div>
           </div>
         </Card>

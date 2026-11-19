@@ -26,8 +26,16 @@ export interface World {
 }
 export interface AblationRow { target?: string; step: string; ic?: number; ic_t?: number; spread_bps?: number; hit_top?: number; added?: number; note?: string; top_new?: string[] }
 export interface Ablation { split: string; results: AblationRow[]; market_model?: { features: number; gbm: { hit: number; base_up_rate: number; sharpe: number; days: number }; ridge: { hit: number; sharpe: number } } }
+export interface Idea {
+  ticker: string; name: string; sector: string; action: "BUY" | "SHORT"; strength: "Strong" | "Solid" | "Moderate";
+  score: number; score_pct: number; exp_move_pct: number; premarket_gap: number | null; ref_price: number;
+  earnings_today: boolean; days_to_earn: number; shares: number; notional: number; plan: string;
+  why: { label: string; key: string; helps: boolean; share: number }[]; headlines: Headline[];
+  option?: { contract: string; premium: number; ev: number; p_profit: number; worth_it: boolean; contracts: number };
+  outcome?: { stock_move: number; rel_move: number; correct: boolean; trade_ret: number };
+}
 export interface Brief {
-  world?: World;
+  world?: World; longs?: Idea[]; shorts?: Idea[]; book?: { per_position: number; positions: number };
   scan_date: string; generated_for: string; equity: number; universe_size: number; scanned: number;
   market: { premarket_gap: number; news_items: number; regime_vol: number; cal_slope: number };
   options: Ticket[]; stocks: Ticket[]; straddles: Straddle[];
