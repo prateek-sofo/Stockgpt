@@ -87,6 +87,11 @@ def data_used(tables: dict, scan_date) -> list[dict]:
     def row(name, what, through, status="ok", note=""):
         out.append(dict(source=name, what=what, through=str(pd.Timestamp(through).date()) if through is not None and pd.notna(through) else None,
                         status=status, note=note))
+    from .config import DATA_DIR
+    import json as _json
+    sj = DATA_DIR / "sources.json"
+    src = _json.loads(sj.read_text()) if sj.exists() else {}
+    sofo = lambda k, direct: f"Sofo World ({direct})" if src.get(k) == "Sofo World" else f"{direct}, read directly until Sofo World supplies it"
     px = tables["prices"]
     known = px[px["date"] < scan]["date"].max() if len(px) else None
     row("Daily prices", "Yahoo Finance, split- and dividend-adjusted", known, note="last close before the scan")
@@ -105,25 +110,24 @@ def data_used(tables: dict, scan_date) -> list[dict]:
             f"latest {seen.max():%b %d %H:%M} ET; history from {ts.min():%Y-%m-%d}" if len(seen) else "no articles before the scan")
     else:
         row("Company news", "Sofo World articles and events", None, "missing", "not connected: no news was used for these ideas")
-    from .config import DATA_DIR
     hp, fp = DATA_DIR / "headlines.parquet", DATA_DIR / "filings.parquet"
     if hp.exists():
         h = pd.read_parquet(hp, columns=["ticker", "published_at"])
         h = h[~h["ticker"].str.startswith("_")]
-        row("News headlines", "Yahoo Finance headlines per ticker", h["published_at"].max().tz_convert(ET).tz_localize(None), "context",
+        row("News headlines", "Sofo World articles" if src.get("news") == "Sofo World" else "Yahoo Finance headlines, read directly until Sofo World supplies them", h["published_at"].max().tz_convert(ET).tz_localize(None), "context",
             f"{h['ticker'].nunique():,} stocks; shown and summarised on each stock page, not used to rank (the model has no headline history to learn from yet)")
     if fp.exists():
         fl = pd.read_parquet(fp, columns=["ticker", "date"])
         last = fl["date"].max()
-        row("SEC filings", "every filing by every listed company, from EDGAR's daily index", last, "context",
+        row("SEC filings", sofo("filings", "EDGAR filings by listed companies"), last, "context",
             f"{int((fl['date'] == last).sum()):,} filings on the latest day; shown on Market and stock pages. Earnings filings feed the model through the earnings dates below")
     e = tables.get("earnings")
     if e is not None and len(e):
         past = e[pd.to_datetime(e["report_date"]) <= scan]
-        row("Earnings dates", "SEC 8-K filings, with before-open or after-close timing", past["report_date"].max() if len(past) else None)
+        row("Earnings dates", sofo("earnings", "SEC 8-K item 2.02"), past["report_date"].max() if len(past) else None)
     f = tables.get("fundamentals")
     if f is not None and len(f):
-        row("Company financials", "SEC quarterly filings, dated by filing day", f[pd.to_datetime(f["report_date"]) < scan]["report_date"].max())
+        row("Company financials", sofo("financials", "SEC quarterly filings, dated by filing day"), f[pd.to_datetime(f["report_date"]) < scan]["report_date"].max())
     op = tables.get("options")
     if op is not None and len(op):
         row("Option prices", "recorded daily snapshots", op[pd.to_datetime(op["date"]) < scan]["date"].max(), "partial",

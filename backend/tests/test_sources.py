@@ -76,3 +76,38 @@ def test_filing_labels_are_plain_and_ranked():
     assert label("10-K/A")["title"].endswith("(amended)")
     # fund and manager paperwork is not company news
     assert label("13F-HR") is None and label("N-CSR") is None and label("D") is None
+
+
+def _sofo_obs():
+    """Observations shaped like Sofo World's SEC crawler output (FN01 metric points, filing records)."""
+    rows = []
+    def metric(name, start, end, val, filed, form="10-Q"):
+        rows.append(dict(entity_ref={"cik": "0000000042"}, field=f"metric.{name}", source_id="FN01", published_at=filed,
+                         value=json.dumps(dict(metric=name, value=val, start=start, end=end, period="Q", form=form, filed=filed))))
+    q = [("2024-01-01", "2024-03-31", "2024-05-02"), ("2024-04-01", "2024-06-30", "2024-08-01"),
+         ("2024-07-01", "2024-09-30", "2024-11-01"), ("2025-01-01", "2025-03-31", "2025-05-01")]
+    for i, (s, e, f) in enumerate(q):
+        metric("revenue", s, e, 100.0 + 10 * i, f)
+        metric("operating_income", s, e, 20.0 + i, f)
+    metric("revenue", "2024-01-01", "2024-12-31", 480.0, "2025-02-10", "10-K")      # FY: Q4 is derived
+    rows.append(dict(entity_ref={"cik": "42"}, field="filing", source_id="ID04", published_at="2025-05-01",
+                     value=dict(form="8-K", filed="2025-05-01", accession="0000000042-25-000007", items=["2.02", "9.01"],
+                                url="https://www.sec.gov/x", accepted="2025-05-01T20:05:00.000Z")))
+    rows.append(dict(entity_ref={"cik": "42"}, field="filing", source_id="ID04", published_at="2025-05-03",
+                     value=dict(form="13F-HR", filed="2025-05-03", accession="0000000042-25-000008", items=[])))
+    return pd.DataFrame(rows)
+
+
+def test_sofo_world_financials_and_filings():
+    from stockgpt.sources.sofo_finance import build
+    listed = pd.DataFrame([dict(ticker="acme", name="Acme", exchange="NYSE", cik=42, sic="3674")])
+    out = build(_sofo_obs(), listed)
+    f = out["fundamentals"].set_index("period_end")
+    # Q4 2024 = FY 480 - (100 + 110 + 120), dated by the 10-K, not earlier
+    assert f.loc["2024-12-31", "revenue"] == 150.0 and str(f.loc["2024-12-31", "report_date"].date()) == "2025-02-10"
+    # Q1 2025 vs Q1 2024: 130 / 100 - 1
+    assert abs(f.loc["2025-03-31", "revenue_growth_yoy"] - 0.30) < 1e-9 and f["ticker"].eq("ACME").all()
+    assert out["coverage"]["metrics_missing"] == ["gross_profit", "net_income", "eps", "cfo", "capex", "cash", "debt", "shares"]
+    assert list(out["filings"]["title"]) == ["Reported financial results"]            # the 13F is not company news
+    e = out["earnings"].iloc[0]
+    assert e["timing"] == "AMC" and bool(e["timing_known"]) and str(e["report_date"].date()) == "2025-05-01"

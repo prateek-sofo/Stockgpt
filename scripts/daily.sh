@@ -9,8 +9,11 @@
 #                              from one earlier `scripts/local.sh real` (or `daily.sh full`).
 #   scripts/daily.sh full      weekly: refresh SEC bulk files, retrain, rerun the walk-forward backtest.
 #
-# All sources are public and keyless: SEC EDGAR, Yahoo Finance, FRED. Set SEC_CONTACT to your email
-# (the SEC asks automated clients to name a contact).
+# Data: set SOFO_DATABASE_URL (read-only role) or SOFO_NEWS_URI (s3:// or folder dump) and news,
+# financials, filings and earnings dates come from Sofo World, the one place that scrapes. Without
+# either, the same public sources are read directly (SEC EDGAR, Yahoo headlines); set SEC_CONTACT
+# to your email for that (the SEC asks automated clients to name a contact). Prices (Yahoo) and
+# rates (FRED) are read here in both cases until Sofo World carries them.
 set -euo pipefail
 MODE=${1:-tracker}
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -22,27 +25,49 @@ mkdir -p "$SEC" "$ART"
 cd "$ROOT/backend"
 step() { echo; echo "== $* ($(date -u +%H:%M) UTC)"; }
 
-step "listed tickers"
-curl -fsS -A "$UA" -o "$SEC/company_tickers_exchange.json" https://www.sec.gov/files/company_tickers_exchange.json
-if [[ $MODE == full || ! -s $SEC/submissions.zip ]]; then
-  step "SEC bulk filings history (1.5 GB)"
-  sleep 1; curl -fsS -A "$UA" -o "$SEC/submissions.zip" https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip
-fi
-if [[ $MODE == full ]]; then
-  step "SEC company financials (1.4 GB)"
-  sleep 1; curl -fsS -A "$UA" -o "$SEC/companyfacts.zip" https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip
-  $PY -m stockgpt.sources.sec
+SOFO=${SOFO_DATABASE_URL:-}${SOFO_NEWS_URI:-}
+from() { $PY -c "import json;print(json.load(open('$RAW/sources.json')).get('$1',''))" 2>/dev/null || true; }
+rm -f "$RAW/sources.json"
+if [[ -n $SOFO ]]; then
+  # Sofo World is the one place that scrapes: news, financials, filings, earnings dates, competitor graph.
+  # Each table is used only if it covers enough of the market; the script says which ones were.
+  step "Sofo World: financials, filings, earnings dates"
+  $PY -m stockgpt.sources.sofo_finance || echo "Sofo World financials not available"
+  step "Sofo World: news, events, competitor graph"
+  $PY -m stockgpt.sources.sofo_world --since 2018-01-01 || echo "Sofo World news not available"
+else
+  echo "SOFO_DATABASE_URL / SOFO_NEWS_URI not set: reading the public sources directly"
 fi
 
+# Anything Sofo World did not supply is read directly from the same public source, for now.
+if [[ $(from financials) != "Sofo World" ]]; then
+  step "listed tickers (SEC, direct)"
+  curl -fsS -A "$UA" -o "$SEC/company_tickers_exchange.json" https://www.sec.gov/files/company_tickers_exchange.json
+  if [[ $MODE == full || ! -s $SEC/submissions.zip ]]; then
+    step "SEC bulk filings history (1.5 GB, direct)"
+    sleep 1; curl -fsS -A "$UA" -o "$SEC/submissions.zip" https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip
+  fi
+  if [[ $MODE == full ]]; then
+    step "SEC company financials (1.4 GB, direct)"
+    sleep 1; curl -fsS -A "$UA" -o "$SEC/companyfacts.zip" https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip
+    $PY -m stockgpt.sources.sec
+  fi
+fi
+
+# Prices and rates are not in Sofo World's catalog yet, so these two are read here in both cases.
 step "prices for every listed ticker"
 if [[ $MODE != tracker && -s $RAW/prices.parquet ]]; then $PY -m stockgpt.sources.alltickers --merge
 else $PY -m stockgpt.sources.alltickers; fi
-step "SEC filings"
-$PY -m stockgpt.sources.filings --days 45
 step "rates, volatility, policy and geopolitical risk"
 $PY -m stockgpt.sources.macro --start 2017-01-01 --no-gdelt || echo "macro refresh failed; keeping the previous series"
-step "headlines"
-$PY -m stockgpt.sources.headlines ${HEADLINE_TOP:+--top $HEADLINE_TOP}
+if [[ $(from filings) != "Sofo World" ]]; then
+  step "SEC filings (direct)"
+  $PY -m stockgpt.sources.filings --days 45
+fi
+if [[ $(from news) != "Sofo World" ]]; then
+  step "headlines (Yahoo, direct)"
+  $PY -m stockgpt.sources.headlines ${HEADLINE_TOP:+--top $HEADLINE_TOP}
+fi
 
 if [[ $MODE != tracker ]]; then
   [[ -s $RAW/prices.parquet && -s $RAW/sec_fundamentals.parquet ]] || { echo "no model history here: run scripts/local.sh real once, or use 'tracker'"; exit 1; }

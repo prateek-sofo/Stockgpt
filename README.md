@@ -36,7 +36,11 @@ itself. What it adds on top of the model:
   Market page listing what helps the bull case and what the risks are, each with the number behind it.
   Every sentence comes from a fixed rule on a dated number or filing; nothing is free-written.
 
-What Sofo World news must provide to be used by the model: `docs/SOFO_WORLD_NEWS_REQUIREMENTS.md`.
+**One place scrapes.** Set `SOFO_DATABASE_URL` or `SOFO_NEWS_URI` and news, financials, filings and
+earnings dates are read from Sofo World (`sources/sofo_world.py`, `sources/sofo_finance.py`). Each
+table switches over once Sofo World covers at least 1,500 listed companies and is current; until then
+that table is read from the public source directly and the Today page says which is which. Prices and
+rates are not in Sofo World's catalog yet. The full contract: `docs/SOFO_WORLD_DATA_REQUIREMENTS.md`.
 
 ## Quick start
 

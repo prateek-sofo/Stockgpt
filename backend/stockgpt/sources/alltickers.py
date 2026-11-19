@@ -20,7 +20,11 @@ LISTED = DATA_DIR / "listed.parquet"
 
 
 def listed() -> pd.DataFrame:
-    d = json.loads((DATA_DIR / "sec" / "company_tickers_exchange.json").read_text())
+    sj, raw = DATA_DIR / "sources.json", DATA_DIR / "sec" / "company_tickers_exchange.json"
+    from_sofo = sj.exists() and json.loads(sj.read_text()).get("financials") == "Sofo World"
+    if LISTED.exists() and (from_sofo or not raw.exists()):
+        return pd.read_parquet(LISTED)             # the listing Sofo World supplied
+    d = json.loads(raw.read_text())
     t = pd.DataFrame(d["data"], columns=d["fields"])
     t["ticker"] = t["ticker"].str.upper().str.replace("-", ".", regex=False)
     t["exchange"] = t["exchange"].fillna("Other")

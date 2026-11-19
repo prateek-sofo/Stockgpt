@@ -256,6 +256,15 @@ if __name__ == "__main__":
     keep = ["published_at", "ticker", "headline", "body", "source", "url", "kind"]
     out = out[[c for c in keep if c in out]]
     out.to_parquet(DATA_DIR / "sofo_news.parquet", index=False)
+    # the same articles feed the stock pages (headline, publisher, time, link)
+    show = out[out.get("kind", "article") == "article"] if "kind" in out else out
+    show = show.assign(id=show["url"].fillna(show["headline"]))[["ticker", "published_at", "headline", "source", "url", "id"]]
+    show.to_parquet(DATA_DIR / "headlines.parquet", index=False)
+    import json
+    sj = DATA_DIR / "sources.json"
+    note = json.loads(sj.read_text()) if sj.exists() else {}
+    note["news"] = "Sofo World"
+    sj.write_text(json.dumps(note, indent=1))
     rel = export_relationships(a.dsn if not a.dump else None, a.dump, sect)
     if len(rel):
         rel.to_parquet(DATA_DIR / "sofo_relationships.parquet", index=False)

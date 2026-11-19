@@ -31,6 +31,7 @@ else
   $PY -m stockgpt.sources.prices --provider yahoo --start 2016-01-01
 fi
 $PY -m stockgpt.sources.sofo_world --since 2018-01-01        # news, events, competitor graph
+$PY -m stockgpt.sources.sofo_finance || true                 # financials, filings, earnings dates (used when coverage is sufficient)
 $PY -m stockgpt.sources.macro --start 2017-01-01 --no-gdelt   # policy uncertainty, geopolitics, rates, markets
 if [[ $MODE == scan ]]; then $PY -m stockgpt.sources.snapshots premarket; fi
 $PY -m stockgpt.sources.assemble --start 2019-01-01
@@ -38,9 +39,10 @@ export STOCKGPT_RETRAIN_DAYS=63
 if [[ $MODE == full ]]; then $PY -m stockgpt.pipeline; else $PY -m stockgpt.pipeline --scan; fi
 
 # every listed ticker: prices, yesterday's SEC filings, headlines, plain-language summaries, market backdrop
+from() { $PY -c "import json;print(json.load(open('$STOCKGPT_DATA_DIR/sources.json')).get('$1',''))" 2>/dev/null || true; }
 $PY -m stockgpt.sources.alltickers
-$PY -m stockgpt.sources.filings --days 45
-$PY -m stockgpt.sources.headlines
+[[ $(from filings) == "Sofo World" ]] || $PY -m stockgpt.sources.filings --days 45     # direct only where Sofo World falls short
+[[ $(from news) == "Sofo World" ]] || $PY -m stockgpt.sources.headlines
 $PY -m stockgpt.tracker
 
 # keep a dated copy of every brief (what the model said before the open, for the track record)
