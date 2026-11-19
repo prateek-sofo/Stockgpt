@@ -6,7 +6,7 @@ import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YA
 import { chartTooltip, ErrorBox, Loading, Pill, SentDot } from "../components/ui";
 import { useApi } from "../lib/api";
 import { compact, num, pct, tone, usd } from "../lib/format";
-import type { AccuracyData, AccuracyRow, Backtest, Brief, DataUsed, Idea, TickerProfile } from "../lib/types";
+import type { AccuracyData, AccuracyRow, Backtest, Brief, DataUsed, Idea, Market, TickerProfile } from "../lib/types";
 
 type Reliability = { level: "Low" | "Moderate" | "High"; color: "down" | "amber" | "up"; text: string };
 
@@ -24,6 +24,7 @@ export default function Today() {
   const { data, error } = useApi<Brief>("brief");
   const { data: acc } = useApi<AccuracyData>("accuracy");
   const { data: bt } = useApi<Backtest>("backtest");
+  const { data: mkt } = useApi<Market>("market");
   const [open, setOpen] = useState<Idea | null>(null);
   const track = useMemo(() => new Map((acc?.stocks ?? []).map((r) => [r.ticker, r])), [acc]);
   if (error) return <ErrorBox error={error} />;
@@ -77,6 +78,16 @@ export default function Today() {
             note={settled.length ? "vs the market, this session" : "fills in after the close"} />
         </div>
       </section>
+      {mkt && (
+        <Link to="/market" className="card mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 transition hover:border-accent/50">
+          <span className="label">Market backdrop</span>
+          <Pill color={mkt.macro.verdict.startsWith("More supports") ? "up" : mkt.macro.verdict.startsWith("More risks") ? "down" : "amber"}>{mkt.macro.verdict}</Pill>
+          <span className="text-[14px] text-ink-200">{mkt.macro.bull.length} things helping stocks, {mkt.macro.risks.length} risks.</span>
+          {mkt.macro.risks[0] && <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-400">Top risk: {mkt.macro.risks[0].text}</span>}
+          {mkt.filings && <span className="text-[13.5px] text-ink-400">{mkt.filings.important.length} notable SEC filings on {fmtDay(mkt.filings.date)}</span>}
+          <ChevronRight className="ml-auto h-4 w-4 text-ink-400" />
+        </Link>)}
+
 
       {/* ---- the ideas ---- */}
       <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">

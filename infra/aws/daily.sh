@@ -37,6 +37,12 @@ $PY -m stockgpt.sources.assemble --start 2019-01-01
 export STOCKGPT_RETRAIN_DAYS=63
 if [[ $MODE == full ]]; then $PY -m stockgpt.pipeline; else $PY -m stockgpt.pipeline --scan; fi
 
+# every listed ticker: prices, yesterday's SEC filings, headlines, plain-language summaries, market backdrop
+$PY -m stockgpt.sources.alltickers
+$PY -m stockgpt.sources.filings --days 45
+$PY -m stockgpt.sources.headlines
+$PY -m stockgpt.tracker
+
 # keep a dated copy of every brief (what the model said before the open, for the track record)
 aws s3 cp --only-show-errors "$STOCKGPT_ARTIFACT_DIR/brief.json" "s3://$STOCKGPT_BUCKET/briefs/$(TZ=America/New_York date +%F).json"
 curl -fsS -X POST http://127.0.0.1:8000/api/health >/dev/null 2>&1 || true

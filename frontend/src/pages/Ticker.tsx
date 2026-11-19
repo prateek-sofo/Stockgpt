@@ -1,38 +1,23 @@
 import clsx from "clsx";
-import { ArrowLeft, Brain, CalendarClock, Newspaper } from "lucide-react";
+import { ArrowLeft, Brain, CalendarClock, ExternalLink, FileText, Newspaper } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import CandleChart from "../components/CandleChart";
-import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, SentDot, Stat, Tabs } from "../components/ui";
+import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, SentDot, Stat, Tabs, ToneDot, TonePill } from "../components/ui";
 import { useApi } from "../lib/api";
 import { compact, num, pct, tone, TRAIT_LABEL, usd } from "../lib/format";
-import type { TickerProfile } from "../lib/types";
+import type { Light, TickerProfile } from "../lib/types";
 
-export default function Ticker() {
-  const { sym = "" } = useParams();
-  const { data, error } = useApi<TickerProfile>(`ticker/${sym.toUpperCase()}`);
+function Full({ data }: { data: TickerProfile }) {
   const [range, setRange] = useState<"60" | "120" | "260">("120");
   const [newsFilter, setNewsFilter] = useState<"all" | "material">("material");
-  if (error) return <ErrorBox error={`${sym.toUpperCase()}: ${error}`} />;
-  if (!data) return <Loading />;
   const px = data.prices.slice(-Number(range));
-  const last = data.prices[data.prices.length - 1];
-  const first = px[0];
   const perf = data.performance;
   const traitRows = Object.entries(data.model);
   const news = data.news.filter((n) => newsFilter === "all" || n.m >= 0.4);
   return (
     <div>
-      <Link to="/stocks" className="mb-3 inline-flex items-center gap-1 text-[13.5px] text-ink-400 hover:text-ink-100"><ArrowLeft className="h-3.5 w-3.5" />Stocks</Link>
-      <PageHeader
-        title={<span className="flex items-center gap-3">{data.ticker}<span className="text-[15px] font-normal text-ink-400">{data.name}</span>
-          {data.liquid ? <Pill color="up">liquid</Pill> : <Pill>illiquid</Pill>}
-          {data.stats.days_to_earn <= 10 && <Pill color="amber"><CalendarClock className="h-3 w-3" />earnings in {data.stats.days_to_earn}d</Pill>}</span>}
-        sub={`${data.sector} · market cap ${compact(data.market_cap, "$")}`}
-        right={<div className="text-right"><div className="num text-[28px] font-semibold">{usd(last.c, 2)}</div>
-          <div className={clsx("num text-[13px]", tone(last.c / first.c - 1))}>{pct(last.c / first.c - 1, 1)} over {range}d</div></div>} />
-
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-8">
         <Stat label="Realised vol" value={pct(data.stats.rv20, 0, false)} />
         <Stat label="IV30" value={pct(data.stats.iv30, 0, false)} sub={`IV rank ${pct(data.stats.iv_rank, 0, false)}`} />
@@ -164,6 +149,98 @@ export default function Ticker() {
           </div>
         </Card>
       </div>
+    </div>
+  );
+}
+
+const day = (s: string) => new Date(s.length > 10 ? s : s + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+export default function Ticker() {
+  const { sym = "" } = useParams();
+  const S = sym.toUpperCase();
+  const { data: shard, error } = useApi<Record<string, Light> & { _dates: string[] }>(`light/${/^[A-Z]/.test(S) ? S[0] : "0"}`);
+  const { data: full } = useApi<TickerProfile>(`ticker/${S}`);
+  if (error) return <ErrorBox error={error} />;
+  if (!shard) return <Loading />;
+  const d = shard[S];
+  if (!d) return <ErrorBox error={`${S} is not a ticker the SEC lists. Check the symbol, or search by company name on the Stocks page.`} />;
+  const series = d.closes.map((c, i) => ({ d: shard._dates[i], c })).filter((x): x is { d: string; c: number } => x.c != null);
+  const up = series.length > 1 && series[series.length - 1].c >= series[0].c;
+  return (
+    <div>
+      <Link to="/stocks" className="mb-3 inline-flex items-center gap-1 text-[13.5px] text-ink-400 hover:text-ink-100"><ArrowLeft className="h-3.5 w-3.5" />Stocks</Link>
+      <PageHeader
+        title={<span className="flex flex-wrap items-center gap-3">{d.ticker}<span className="text-[15px] font-normal text-ink-400">{d.name}</span></span>}
+        sub={<span className="flex flex-wrap items-center gap-2">{d.exchange}{d.sector && ` · ${d.sector}`}
+          {d.modelled ? <Pill color="accent">Model follows this stock</Pill> : <Pill>Tracked: price, filings and news only</Pill>}
+          {d.model?.action && <Pill color={d.model.action === "BUY" ? "up" : "down"}>{d.model.action === "BUY" ? "Buy idea today" : "Short idea today"}</Pill>}</span>}
+        right={d.price != null ? <div className="text-right"><div className="num text-[28px] font-semibold">{usd(d.price, 2)}</div>
+          <div className={clsx("num text-[13px]", tone(d.chg.d1))}>{pct(d.chg.d1, 1)} on {day(d.as_of!)}</div></div> : <Pill color="amber">No current price</Pill>} />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.25fr_1fr]">
+        <Card title="In plain words">
+          <p className="text-[16px] font-medium leading-snug text-ink-100">{d.summary.line}</p>
+          <ul className="mt-3 space-y-2.5">
+            {d.summary.points.map((p, i) => (
+              <li key={i} className="flex gap-2.5 text-[14px] leading-snug text-ink-200"><ToneDot t={p.tone} /><span>{p.text}</span></li>))}
+          </ul>
+          {!d.summary.points.length && <p className="mt-2 text-[14px] text-ink-400">Nothing notable on record for this ticker in the past 45 days.</p>}
+          <p className="mt-4 text-[12.5px] text-ink-500">Written by fixed rules from prices, SEC filings and headlines. Green helps, red hurts, amber is worth a look, grey is routine.</p>
+        </Card>
+        <Card title="Price, past 6 months">
+          {series.length > 1 ? (<>
+            <div className="h-[200px]">
+              <ResponsiveContainer>
+                <LineChart data={series} margin={{ left: -8, right: 8 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="d" tickLine={false} axisLine={false} minTickGap={60} tickFormatter={(v) => day(v)} />
+                  <YAxis domain={["auto", "auto"]} tickLine={false} axisLine={false} width={52} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => [usd(v, 2), "close"]} />
+                  <Line dataKey="c" stroke={up ? "var(--color-up)" : "var(--color-down)"} dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-2 text-center text-[12.5px]">
+              {([["Week", d.chg.w1], ["Month", d.chg.m1], ["3 months", d.chg.m3], ["Year", d.chg.y1]] as const).map(([l, v]) => (
+                <div key={l}><div className="text-ink-500">{l}</div><div className={clsx("num text-[14px]", tone(v))}>{pct(v, 0)}</div></div>))}
+            </div>
+          </>) : <div className="grid h-[200px] place-items-center text-[14px] text-ink-400">No recent trading on record.</div>}
+        </Card>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card title={<span className="flex items-center gap-2"><FileText className="h-4 w-4 text-accent" />SEC filings, past 45 days ({d.filings.length})</span>} pad={false}>
+          <ul className="max-h-[440px] divide-y divide-ink-800 overflow-auto px-5 pb-3">
+            {d.filings.map((f, i) => (
+              <li key={i} className="py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="num text-[12.5px] text-ink-400">{day(f.d)}</span>
+                  <span className="text-[14px] font-medium text-ink-100">{f.title}</span>
+                  {f.imp >= 2 && <TonePill t={f.tone} />}
+                  <a href={f.url} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-[12.5px] text-ink-400 hover:text-accent">Form {f.form}<ExternalLink className="h-3 w-3" /></a>
+                </div>
+                <div className="mt-1 text-[13px] text-ink-400">{f.why}</div>
+              </li>))}
+            {!d.filings.length && <li className="py-8 text-center text-[14px] text-ink-400">No filings in the past 45 days.</li>}
+          </ul>
+        </Card>
+        <Card title={<span className="flex items-center gap-2"><Newspaper className="h-4 w-4 text-sky" />News, past 10 days ({d.news.length})</span>} pad={false}>
+          <ul className="max-h-[440px] divide-y divide-ink-800 overflow-auto px-5 pb-3">
+            {d.news.map((n, i) => (
+              <li key={i} className="flex gap-2.5 py-3"><ToneDot t={n.tone} />
+                <a href={n.url} target="_blank" rel="noreferrer" className="text-[14px] leading-snug text-ink-100 hover:text-accent">{n.h}
+                  <div className="mt-0.5 text-[12.5px] text-ink-500">{n.src} · {new Date(n.t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div></a>
+              </li>))}
+            {!d.news.length && <li className="py-8 text-center text-[14px] text-ink-400">{d.modelled ? "No stories tagged to this ticker in the past 10 days." : "Headlines are collected for the stocks the model follows; this one is not among them yet."}</li>}
+          </ul>
+        </Card>
+      </div>
+
+      {full && (
+        <details className="mt-6">
+          <summary className="cursor-pointer text-[15px] font-semibold text-ink-100">Model detail for {d.ticker}: accuracy, behaviour, earnings history</summary>
+          <div className="mt-4"><Full data={full} /></div>
+        </details>)}
     </div>
   );
 }

@@ -83,6 +83,23 @@ def ticker(symbol: str):
     return _load(f"tickers/{symbol.upper()}.json")
 
 
+@app.get("/api/market")
+def market():
+    return _load("market.json")
+
+
+@app.get("/api/all")
+def all_tickers():
+    return _load("all.json")
+
+
+@app.get("/api/light/{shard}")
+def light(shard: str):
+    if not re.fullmatch(r"[A-Z0]", shard):
+        raise HTTPException(400, "bad shard")
+    return _load(f"light/{shard}.json")
+
+
 @app.post("/api/run")
 def run(mode: str = "scan"):
     """Kick off the pipeline. mode=scan (daily, ~30s) or mode=full (retrain + backtest)."""

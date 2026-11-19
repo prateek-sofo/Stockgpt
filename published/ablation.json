@@ -1,0 +1,181 @@
+{
+ "split": "2024-01-01",
+ "source": "user",
+ "results": [
+  {
+   "ic": 0.01719048646909268,
+   "ic_t": 3.1140046932944836,
+   "spread_bps": 15.048572616235079,
+   "hit_top": 0.5052553772335684,
+   "hit_bottom": 0.5117789513530335,
+   "days": 721,
+   "target": "z_oc",
+   "step": "+ price",
+   "added": 27,
+   "features": 27,
+   "top_new": [
+    "mkt_ret_1d",
+    "ret_5d_z",
+    "ret_20d_z",
+    "iv_rank"
+   ]
+  },
+  {
+   "ic": 0.0198739892906319,
+   "ic_t": 4.157429422973364,
+   "spread_bps": 13.602853878170327,
+   "hit_top": 0.5131104292298548,
+   "hit_bottom": 0.5069806444958036,
+   "days": 721,
+   "target": "z_oc",
+   "step": "+ earnings+fundamentals",
+   "added": 15,
+   "features": 42,
+   "top_new": [
+    "tr_eps_surprise",
+    "days_since_earn",
+    "days_to_earn",
+    "f_net_margin"
+   ]
+  },
+  {
+   "target": "z_oc",
+   "step": "+ company news",
+   "added": 0,
+   "note": "no data for this group yet"
+  },
+  {
+   "ic": 0.018584808039934772,
+   "ic_t": 3.9032778443172202,
+   "spread_bps": 11.917528613688793,
+   "hit_top": 0.5111746031280853,
+   "hit_bottom": 0.5068381935088125,
+   "days": 721,
+   "target": "z_oc",
+   "step": "+ competitors+peers",
+   "added": 13,
+   "features": 55,
+   "top_new": [
+    "tr_peer_ind_ret1",
+    "tx_peer_ind_ret1",
+    "peer_corr_ret1",
+    "peer_ind_ret1"
+   ]
+  },
+  {
+   "ic": 0.015606305856300077,
+   "ic_t": 2.309334674342545,
+   "spread_bps": 20.081315903630763,
+   "hit_top": 0.510773750291205,
+   "hit_bottom": 0.5172232936352752,
+   "days": 721,
+   "target": "z_oc",
+   "step": "+ macro+political world",
+   "added": 22,
+   "features": 77,
+   "top_new": [
+    "mkt_spx_ret1",
+    "politics_gpr_threats_z",
+    "mkt_vix_chg",
+    "mkt_spx_ret5"
+   ]
+  },
+  {
+   "ic": 0.02048364298150303,
+   "ic_t": 3.025397711694552,
+   "spread_bps": 24.877888540528723,
+   "hit_top": 0.5086798605865088,
+   "hit_bottom": 0.5148248016151159,
+   "days": 721,
+   "target": "z_x",
+   "step": "+ price",
+   "added": 27,
+   "features": 27,
+   "top_new": [
+    "mkt_ret_1d",
+    "atr14_pct",
+    "log_adv20",
+    "ret_60d_z"
+   ]
+  },
+  {
+   "ic": 0.020535649060153094,
+   "ic_t": 3.1081963318088435,
+   "spread_bps": 25.38533705311224,
+   "hit_top": 0.5084807540131772,
+   "hit_bottom": 0.5171082521037443,
+   "days": 721,
+   "target": "z_x",
+   "step": "+ earnings+fundamentals",
+   "added": 15,
+   "features": 42,
+   "top_new": [
+    "days_to_earn",
+    "tr_eps_surprise",
+    "days_since_earn",
+    "hist_earn_move"
+   ]
+  },
+  {
+   "target": "z_x",
+   "step": "+ company news",
+   "added": 0,
+   "note": "no data for this group yet"
+  },
+  {
+   "ic": 0.018915131281182565,
+   "ic_t": 2.9529503396773267,
+   "spread_bps": 24.31957239505348,
+   "hit_top": 0.5095085459793728,
+   "hit_bottom": 0.5146012978953343,
+   "days": 721,
+   "target": "z_x",
+   "step": "+ competitors+peers",
+   "added": 13,
+   "features": 55,
+   "top_new": [
+    "tr_peer_ind_ret1",
+    "peer_corr_ret1",
+    "peer_ind_earn_surp",
+    "peer_ind_ret1"
+   ]
+  },
+  {
+   "ic": 0.015522027281977706,
+   "ic_t": 2.3631377494382004,
+   "spread_bps": 16.15872935869653,
+   "hit_top": 0.5052978364993554,
+   "hit_bottom": 0.5120400978639669,
+   "days": 721,
+   "target": "z_x",
+   "step": "+ macro+political world",
+   "added": 22,
+   "features": 77,
+   "top_new": [
+    "mkt_dxy_ret1",
+    "mkt_oil_ret1",
+    "mkt_vix_chg",
+    "fred_emv_epu_z"
+   ]
+  }
+ ],
+ "market_model": {
+  "features": 19,
+  "ridge": {
+   "hit": 0.4812760055478502,
+   "corr": 0.05741932005232529,
+   "ann_ret": -0.1177341639995575,
+   "sharpe": -0.8092939104317911,
+   "base_up_rate": 0.4868238557558946,
+   "days": 721
+  },
+  "gbm": {
+   "hit": 0.5062413314840499,
+   "corr": 0.05919178902099704,
+   "ann_ret": 0.040257680483803605,
+   "sharpe": 0.27641014791799295,
+   "base_up_rate": 0.4868238557558946,
+   "days": 721
+  }
+ }
+}

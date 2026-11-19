@@ -7,6 +7,7 @@ import type { Meta } from "../lib/types";
 
 const NAV = [
   { to: "/", label: "Today" },
+  { to: "/market", label: "Market" },
   { to: "/stocks", label: "Stocks" },
   { to: "/performance", label: "Performance" },
   { to: "/planner", label: "Planner" },

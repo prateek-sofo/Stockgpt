@@ -16,6 +16,28 @@ Pages: Morning Brief · **Model Accuracy** (per-stock and index-fund backtests) 
 research holdout, ablation, deflated Sharpe) · Growth Planner · Universe · Long-term · Data & Models.
 Research basis: [docs/RESEARCH.md](docs/RESEARCH.md).
 
+## Keep it live: the daily refresh
+
+```bash
+scripts/daily.sh tracker   # every listed ticker (10,400): prices, SEC filings, headlines, market summary. ~30 min
+scripts/daily.sh scan      # tracker + today's model ideas (needs one earlier `scripts/local.sh real`)
+scripts/daily.sh full      # weekly: refresh SEC bulk files, retrain, rerun the backtest
+```
+
+Run it from cron or launchd every weekday morning on a machine that stays on, and the app updates
+itself. What it adds on top of the model:
+
+* **Every listed ticker** (`sources/alltickers.py`): the SEC's full ticker list with one year of prices.
+* **Every SEC filing, daily** (`sources/filings.py`): EDGAR's daily index, with each filing labelled in
+  plain words (what it is, why it matters, good / bad / worth a look), including what each 8-K is about.
+* **Headlines** (`sources/headlines.py`): per ticker and for the economy, policy and politics. Headline,
+  publisher, time and link only.
+* **Plain-language summaries** (`tracker.py`): a one-line read and a short list for every stock, and a
+  Market page listing what helps the bull case and what the risks are, each with the number behind it.
+  Every sentence comes from a fixed rule on a dated number or filing; nothing is free-written.
+
+What Sofo World news must provide to be used by the model: `docs/SOFO_WORLD_NEWS_REQUIREMENTS.md`.
+
 ## Quick start
 
 ```bash

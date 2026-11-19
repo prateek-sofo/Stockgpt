@@ -62,3 +62,17 @@ def test_fundamentals_point_in_time(tmp_path):
     assert pd.Timestamp(last["report_date"]) == pd.Timestamp("2025-05-02")   # keyed by filing date
     assert abs(last["revenue_growth_yoy"] - 0.2) < 1e-9
     assert abs(last["operating_margin"] - 0.25) < 1e-9
+
+
+def test_filing_labels_are_plain_and_ranked():
+    from stockgpt.sources.filings import label
+    e = label("8-K", "2.02,9.01")
+    assert e["title"] == "Reported financial results" and e["importance"] == 3
+    # the most important item leads; the rest are mentioned
+    mixed = label("8-K", "7.01,4.02,9.01")
+    assert mixed["title"].startswith("Said past financial statements cannot be relied on") and mixed["tone"] == "bad"
+    assert label("NT 10-Q")["tone"] == "bad"
+    assert label("4")["importance"] == 1 and label("424B2")["importance"] == 1
+    assert label("10-K/A")["title"].endswith("(amended)")
+    # fund and manager paperwork is not company news
+    assert label("13F-HR") is None and label("N-CSR") is None and label("D") is None

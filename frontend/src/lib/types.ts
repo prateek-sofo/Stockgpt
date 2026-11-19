@@ -150,3 +150,26 @@ export interface AccuracyData {
 export interface ResearchVariant { variant: string; hold_days: number; note: string; ic: number; ic_t: number; spread_bps: number; gross_bps_day: number; net_bps_day: number; net_ann: number; sharpe: number; hit_long: number; hit_short: number; by_year: Record<string, number>; days: number }
 export interface Research { split: string; purge_sessions: number; train_rows: number; test_rows: number; cost_bps_round_trip: number; book: string; variants: ResearchVariant[]; top_features_5d: { feature: string; importance: number; research: boolean }[] }
 export interface Robustness { sharpe: number; psr: number | null; dsr: number | null; sharpe_needed?: number; trials: number }
+
+export type Tone = "good" | "bad" | "watch" | "info" | "";
+export interface MacroPoint { text: string; value: string; as_of: string }
+export interface Market {
+  as_of: string; news_through: string | null; filings_through: string | null;
+  macro: { verdict: string; line: string; note: string; as_of: string; bull: MacroPoint[]; risks: MacroPoint[]; neutral: MacroPoint[];
+    headlines: { topic: string; headline: string; source: string; url: string; time: string; tone: Tone }[] };
+  filings: { date: string; total: number; companies: number; by_tone: Record<string, number>;
+    important: { ticker: string; name: string; title: string; why: string; tone: Tone; form: string; url: string }[] } | null;
+  movers: { up: Mover[]; down: Mover[] };
+  counts: { listed: number; priced: number; modelled: number; with_filings: number; with_news: number; by_exchange: Record<string, number> };
+}
+export interface Mover { ticker: string; name: string; chg: number; price: number; line: string }
+export interface AllData { cols: string[]; rows: (string | number | null)[][]; as_of: string }
+export interface Light {
+  ticker: string; name: string; exchange: string; sector: string; price: number | null; as_of: string | null;
+  chg: { d1: number | null; w1: number | null; m1: number | null; m3: number | null; y1: number | null };
+  hi52: number | null; lo52: number | null; closes: (number | null)[];
+  summary: { line: string; points: { tone: Tone; text: string }[] }; modelled: boolean;
+  model: { action?: "BUY" | "SHORT"; strength?: string; accuracy?: number; days?: number } | null;
+  filings: { d: string; title: string; why: string; tone: Tone; form: string; url: string; imp: number }[];
+  news: { t: string; h: string; src: string; url: string; tone: Tone }[];
+}

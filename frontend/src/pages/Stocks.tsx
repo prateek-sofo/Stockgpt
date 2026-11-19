@@ -6,6 +6,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, Res
 import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, Stat, Tabs } from "../components/ui";
 import { useApi } from "../lib/api";
 import { num, pct, tone } from "../lib/format";
+import AllTickers from "./AllTickers";
 import type { AccuracyData, AccuracyDetail, AccuracyRow, FundHorizon, IndexFund, TickerProfile, UniverseRow } from "../lib/types";
 
 const accTone = (a: number | null | undefined, z?: number | null) =>
@@ -27,7 +28,7 @@ const COLS: { k: SortKey; label: string; hint: string; fmt: (r: Row) => React.Re
 export default function Stocks() {
   const { data, error } = useApi<AccuracyData>("accuracy");
   const { data: uni } = useApi<UniverseRow[]>("universe");
-  const [tab, setTab] = useState<"stocks" | "index">("stocks");
+  const [tab, setTab] = useState<"all" | "stocks" | "index">("all");
   const [q, setQ] = useState("");
   const [liquidOnly, setLiquidOnly] = useState(true);
   const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: "strong_accuracy", d: -1 });
@@ -49,10 +50,11 @@ export default function Stocks() {
   return (
     <div>
       <PageHeader title="Stocks"
-        sub={`Every stock the model follows, with how often it has been right on that stock. All figures are out-of-sample, ${data.period.start} to ${data.period.end}. Click a row for the detail.`}
-        right={<Tabs value={tab} onChange={setTab} items={[{ v: "stocks", label: `Stocks (${data.stocks.length.toLocaleString()})` }, { v: "index", label: `Index funds (${data.index?.funds.length ?? 0})` }]} />} />
+        sub={tab === "all" ? "Every publicly traded ticker the SEC lists, with its price, filings, news and a one-line read of what is happening. Click a row for the full picture."
+          : `Every stock the model follows, with how often it has been right on that stock. All figures are out-of-sample, ${data.period.start} to ${data.period.end}. Click a row for the detail.`}
+        right={<Tabs value={tab} onChange={setTab} items={[{ v: "all", label: "All tickers" }, { v: "stocks", label: `Model accuracy (${data.stocks.length.toLocaleString()})` }, { v: "index", label: `Index funds (${data.index?.funds.length ?? 0})` }]} />} />
 
-      {tab === "stocks" ? (<>
+      {tab === "all" ? <AllTickers /> : tab === "stocks" ? (<>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Stat label="Typical stock, strong calls" value={pct(s.strong_median_accuracy, 1, false)} sub="right, on the days it would be traded. A coin flip is 50%." valueClass={s.strong_median_accuracy > 0.5 ? "text-up" : "text-down"} />
           <Stat label="Typical stock, all days" value={pct(s.median_accuracy, 1, false)} sub="right against the market" />

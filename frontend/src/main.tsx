@@ -9,6 +9,7 @@ import Performance from "./pages/Performance";
 import Stocks from "./pages/Stocks";
 import Today from "./pages/Today";
 import Longterm from "./pages/Longterm";
+import Market from "./pages/Market";
 import Planner from "./pages/Planner";
 import Ticker from "./pages/Ticker";
 
@@ -21,6 +22,7 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Today />} />
+          <Route path="market" element={<Market />} />
           <Route path="stocks" element={<Stocks />} />
           <Route path="performance" element={<Performance />} />
           <Route path="planner" element={<Planner />} />

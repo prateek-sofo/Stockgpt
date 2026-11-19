@@ -105,6 +105,18 @@ def data_used(tables: dict, scan_date) -> list[dict]:
             f"latest {seen.max():%b %d %H:%M} ET; history from {ts.min():%Y-%m-%d}" if len(seen) else "no articles before the scan")
     else:
         row("Company news", "Sofo World articles and events", None, "missing", "not connected: no news was used for these ideas")
+    from .config import DATA_DIR
+    hp, fp = DATA_DIR / "headlines.parquet", DATA_DIR / "filings.parquet"
+    if hp.exists():
+        h = pd.read_parquet(hp, columns=["ticker", "published_at"])
+        h = h[~h["ticker"].str.startswith("_")]
+        row("News headlines", "Yahoo Finance headlines per ticker", h["published_at"].max().tz_convert(ET).tz_localize(None), "context",
+            f"{h['ticker'].nunique():,} stocks; shown and summarised on each stock page, not used to rank (the model has no headline history to learn from yet)")
+    if fp.exists():
+        fl = pd.read_parquet(fp, columns=["ticker", "date"])
+        last = fl["date"].max()
+        row("SEC filings", "every filing by every listed company, from EDGAR's daily index", last, "context",
+            f"{int((fl['date'] == last).sum()):,} filings on the latest day; shown on Market and stock pages. Earnings filings feed the model through the earnings dates below")
     e = tables.get("earnings")
     if e is not None and len(e):
         past = e[pd.to_datetime(e["report_date"]) <= scan]
@@ -118,7 +130,6 @@ def data_used(tables: dict, scan_date) -> list[dict]:
             "real where recorded, estimated elsewhere")
     else:
         row("Option prices", "implied volatility", None, "estimated", "estimated from recent price swings; no option price history")
-    from .config import DATA_DIR
     mp = DATA_DIR / "macro_raw.parquet"
     if mp.exists():
         m = pd.read_parquet(mp).dropna(how="all")

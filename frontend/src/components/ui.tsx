@@ -150,3 +150,15 @@ export const chartTooltip = {
   itemStyle: { padding: 0 },
   cursor: { stroke: "var(--color-ink-500)", strokeDasharray: "3 3" },
 };
+
+const TONE: Record<string, { dot: string; label: string; pill: "up" | "down" | "amber" | "ink" }> = {
+  good: { dot: "bg-up", label: "Usually good", pill: "up" }, bad: { dot: "bg-down", label: "Usually bad", pill: "down" },
+  watch: { dot: "bg-amber", label: "Worth a look", pill: "amber" }, info: { dot: "bg-ink-400", label: "Routine", pill: "ink" },
+};
+export function ToneDot({ t }: { t: string }) {
+  return <span className={clsx("mt-[7px] inline-block h-2 w-2 shrink-0 rounded-full", (TONE[t] ?? TONE.info).dot)} />;
+}
+export function TonePill({ t }: { t: string }) {
+  const x = TONE[t] ?? TONE.info;
+  return <Pill color={x.pill}>{x.label}</Pill>;
+}

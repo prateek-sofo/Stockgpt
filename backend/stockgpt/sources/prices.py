@@ -73,7 +73,7 @@ def polygon(start: str, end: str | None = None, tickers: set[str] | None = None,
 
 
 def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0,
-          cache_dir: Path | None = None) -> pd.DataFrame:
+          cache_dir: Path | None = None, threads: int | bool = False) -> pd.DataFrame:
     """Open-source route: yfinance (Apache-2.0) over Yahoo Finance's public daily bars.
     Split- and dividend-adjusted OHLCV. Batched and paced; each batch is cached so a rerun resumes."""
     import yfinance as yf
@@ -88,7 +88,7 @@ def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0
             frames.append(pd.read_parquet(f))
             continue
         ymap = {t.replace(".", "-"): t for t in chunk}            # BRK.B -> BRK-B on Yahoo
-        raw = yf.download(list(ymap), start=start, auto_adjust=True, progress=False, threads=False,
+        raw = yf.download(list(ymap), start=start, auto_adjust=True, progress=False, threads=threads,
                           group_by="column")
         if raw is None or raw.empty:
             pd.DataFrame().to_parquet(f)

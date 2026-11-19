@@ -1,0 +1,209 @@
+{
+ "split": "2024-01-01",
+ "source": "user",
+ "purge_sessions": 10,
+ "train_rows": 1500000,
+ "test_rows": 420108,
+ "cost_bps_round_trip": 5.999999999999999,
+ "book": "top 25 long / bottom 25 short, equal weight",
+ "variants": [
+  {
+   "variant": "v2: current features, 1-day",
+   "hold_days": 1,
+   "note": "price, earnings, fundamentals, competitor news/earnings",
+   "ic": 0.018082307560865905,
+   "ic_t": 2.876944206316503,
+   "spread_bps": 23.435489654541016,
+   "gross_bps_day": 15.450948715209961,
+   "net_bps_day": 9.450947761535645,
+   "net_ann": 0.23816387355327606,
+   "sharpe": 1.3238515762087963,
+   "hit_long": 0.515506241331484,
+   "hit_short": 0.5297087378640777,
+   "by_year": {
+    "2024": 1.89,
+    "2025": 16.53,
+    "2026": 10.07
+   },
+   "days": 721
+  },
+  {
+   "variant": "+ literature signals, 1-day",
+   "hold_days": 1,
+   "note": "tug-of-war, momentum, reversal, MAX, 52w high, Amihud, ivol, beta, Alpha158",
+   "ic": 0.01869559101662336,
+   "ic_t": 2.9884247146878162,
+   "spread_bps": 21.428707122802734,
+   "gross_bps_day": 13.11988353729248,
+   "net_bps_day": 7.1198835372924805,
+   "net_ann": 0.179421067237854,
+   "sharpe": 1.1290805336147622,
+   "hit_long": 0.5202773925104022,
+   "hit_short": 0.5236615811373093,
+   "by_year": {
+    "2024": -0.2,
+    "2025": 16.04,
+    "2026": 5.36
+   },
+   "days": 721
+  },
+  {
+   "variant": "+ 3-seed ensemble, 1-day",
+   "hold_days": 1,
+   "note": "average of three models with different random seeds",
+   "ic": 0.01979734866921529,
+   "ic_t": 3.152521011365544,
+   "spread_bps": 22.323190689086914,
+   "gross_bps_day": 15.4013671875,
+   "net_bps_day": 9.4013671875,
+   "net_ann": 0.23691445589065552,
+   "sharpe": 1.4749364684229602,
+   "hit_long": 0.5222746185852982,
+   "hit_short": 0.5276560332871012,
+   "by_year": {
+    "2024": 2.42,
+    "2025": 17.64,
+    "2026": 8.03
+   },
+   "days": 721
+  },
+  {
+   "variant": "5-day target, held 5 days",
+   "hold_days": 5,
+   "note": "same features, predicts open t -> close t+4",
+   "ic": 0.01923500619405141,
+   "ic_t": 1.0199931576966499,
+   "spread_bps": 70.7058334350586,
+   "gross_bps_day": 9.989154815673828,
+   "net_bps_day": 8.789155006408691,
+   "net_ann": 0.22148670256137848,
+   "sharpe": 0.8885499262936325,
+   "hit_long": 0.5234588563458856,
+   "hit_short": 0.5380753138075314,
+   "by_year": {
+    "2024": -0.46,
+    "2025": 11.13,
+    "2026": 16.9
+   },
+   "days": 717
+  },
+  {
+   "variant": "1-day + 5-day ensemble, held 5 days",
+   "hold_days": 5,
+   "note": "rank-average of both horizons",
+   "ic": 0.02225848831655762,
+   "ic_t": 1.1846638158973342,
+   "spread_bps": 75.97567749023438,
+   "gross_bps_day": 10.130353927612305,
+   "net_bps_day": 8.930354118347168,
+   "net_ann": 0.22504493594169617,
+   "sharpe": 0.8895031797105077,
+   "hit_long": 0.522094651358163,
+   "hit_short": 0.5364583333333334,
+   "by_year": {
+    "2024": 2.09,
+    "2025": 10.36,
+    "2026": 15.29
+   },
+   "days": 717
+  },
+  {
+   "variant": "5-day model, traded daily",
+   "hold_days": 1,
+   "note": "does the slower signal also work at one day?",
+   "ic": 0.015822479851002397,
+   "ic_t": 2.411288369544773,
+   "spread_bps": 20.196935653686523,
+   "gross_bps_day": 12.434319496154785,
+   "net_bps_day": 6.434319019317627,
+   "net_ann": 0.16214483976364136,
+   "sharpe": 0.9707357282998893,
+   "hit_long": 0.5097364771151179,
+   "hit_short": 0.5251595006934813,
+   "by_year": {
+    "2024": -2.29,
+    "2025": 11.74,
+    "2026": 10.41
+   },
+   "days": 721
+  }
+ ],
+ "trials": 6,
+ "top_features_5d": [
+  {
+   "feature": "mkt_ret_1d",
+   "importance": 0.10059607445158988,
+   "research": false
+  },
+  {
+   "feature": "ivol_60",
+   "importance": 0.09599761929609157,
+   "research": true
+  },
+  {
+   "feature": "tr_eps_surprise",
+   "importance": 0.0720889700140974,
+   "research": false
+  },
+  {
+   "feature": "days_to_earn",
+   "importance": 0.06474891008000751,
+   "research": false
+  },
+  {
+   "feature": "dist_52w_high",
+   "importance": 0.04731387328352859,
+   "research": true
+  },
+  {
+   "feature": "atr14_pct",
+   "importance": 0.044567405582836304,
+   "research": false
+  },
+  {
+   "feature": "rv20",
+   "importance": 0.04184322887161721,
+   "research": false
+  },
+  {
+   "feature": "days_since_earn",
+   "importance": 0.03501865671945726,
+   "research": false
+  },
+  {
+   "feature": "ret_60d_z",
+   "importance": 0.03200000843730308,
+   "research": false
+  },
+  {
+   "feature": "log_mcap",
+   "importance": 0.02848443189817684,
+   "research": false
+  },
+  {
+   "feature": "iv_rank",
+   "importance": 0.02661896030288581,
+   "research": false
+  },
+  {
+   "feature": "beta_60",
+   "importance": 0.026592571082415827,
+   "research": true
+  },
+  {
+   "feature": "f_net_margin",
+   "importance": 0.02441231872296944,
+   "research": false
+  },
+  {
+   "feature": "hist_earn_move",
+   "importance": 0.021260178479830163,
+   "research": false
+  },
+  {
+   "feature": "mom_6_1",
+   "importance": 0.021257777689330234,
+   "research": true
+  }
+ ]
+}
