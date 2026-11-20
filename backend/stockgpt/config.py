@@ -61,6 +61,7 @@ class RiskConfig:
     min_ev: float = 0.03                        # min model EV on premium (3%) after costs
     market_neutral: bool = True                 # stock day trades: equal long and short books
     stock_selection: str = "rank"               # "rank": long top-k / short bottom-k; "threshold": prob + EV gates
+    beta_neutral: bool = os.getenv("STOCKGPT_BETA_NEUTRAL", "1") == "1"   # rank on the score with market sensitivity removed
     rank_k: int = 25
     swing_k: int = 25                           # 5-session book: long top-k / short bottom-k, one sleeve a day
     stock_leverage: float = 2.0                 # gross intraday exposure for stock day trades

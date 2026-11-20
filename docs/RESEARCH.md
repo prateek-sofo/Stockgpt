@@ -68,3 +68,54 @@ maps the main findings to what is implemented, with the file where each lives.
 3. Rank stocks against each other and trade a balanced long/short book; do not try to call the market.
 4. Options amplify a directional edge but charge a volatility premium and a spread; use them only when the calibrated expected value clears costs (earnings and large news days).
 5. Judge every result after costs, by year, and against the number of things tried.
+
+## 7. Finding from the first live day (Nov 20, 2026): the book carried a market bet
+
+On the first day recorded live, 4 of 20 calls were on track at midday while the S&P 500 was down
+1.7% from its open. The ten buys had an average 60-day beta of 1.84 and the ten shorts 0.12: equal
+dollars long and short, but not equal market sensitivity. After removing each stock's beta times the
+market move, 7 of 20 were right, so beta explains part of the day, not all of it.
+
+Checked on the 1,723 out-of-sample days of the walk-forward (same model, same predictions; only the
+way stocks are picked changes; top and bottom 25, 3 bps a side, no leverage):
+
+| Selection | Return a year | Sharpe | Worst drawdown | Book beta | Hit rate | Avg day when market < -1% | when > +1% |
+|---|---|---|---|---|---|---|---|
+| Raw score (before) | 2.9% | 0.27 | -44.2% | -0.29 | 51.7% | +56.8 bp | -56.4 bp |
+| Score with beta removed | 2.8% | 0.31 | -35.1% | -0.14 | 51.4% | +25.9 bp | -23.9 bp |
+| Matched inside beta fifths (now) | 2.4% | 0.29 | -34.7% | -0.11 | 51.3% | +19.0 bp | -17.7 bp |
+| Beta fifths, sector-relative score | 1.0% | 0.16 | -35.4% | -0.10 | 51.3% | +15.7 bp | -15.6 bp |
+
+The same three rules through the full simulation (2x gross, drawdown brake, same repaired prices):
+
+| Selection | Total since 2020 | A year | Sharpe | Worst drawdown | Deflated Sharpe | 2026 |
+|---|---|---|---|---|---|---|
+| Raw score (before) | +14.2% | 2.0% | 0.21 | -70.7% | 0.11 | -13.4% |
+| Score with beta removed | +24.1% | 3.2% | 0.25 | -59.4% | 0.13 | +2.5% |
+| Matched inside beta fifths (now) | +27.6% | 3.6% | 0.28 | -57.8% | 0.14 | +14.0% |
+
+What this says:
+
+1. The raw book's market exposure is large and changes sign. On average it leaned against the market
+   (it gained on down days and lost on up days); on Nov 20 it leaned with it. Either way, a day's
+   result was driven more by the market's direction than by stock selection.
+2. Removing beta from the score roughly halves that exposure and cuts the worst drawdown by about nine
+   points, at no cost in return. It does not make the model more accurate: the hit rate stays near
+   51.5%. This is risk control, not new skill.
+3. Adopted: the day's stocks are split into five groups by beta and the strongest and weakest are
+   taken inside each group, so every buy has a short of similar beta (`RiskConfig.beta_neutral`,
+   `backtest.pick_sides`). Removing beta from the score alone balanced the books on average but left
+   a gap of 0.9 on Nov 20 itself; matching bounds it every day (0.91 vs 0.84 on Nov 20). These are the
+   15th and 16th variants tried on this data and are counted in the deflated Sharpe. The Today page
+   states each book's beta before the open.
+4. The proper fix is to train on a beta-adjusted target (the stock's move minus beta times the
+   market's) rather than to neutralise afterwards. That needs a full walk-forward rerun and is the
+   next model experiment.
+5. The headline number is fragile. The raw rule was published at +52% since 2020 a few days earlier;
+   rerun after the SEC listing refresh changed the universe from 2,591 to 2,545 stocks it gives +14%.
+   Daily returns of the two runs correlate 0.99, yet small differences on a third of the days compound
+   to that gap. No single total-return figure from this model should be relied on.
+6. The same day exposed a data fault: a throttled price download had left Nov 9 to 11 with 1,838 of
+   2,545 stocks. Eight of the twenty ideas issued on Nov 20 were built on those gaps. Price merges now
+   add or replace single rows and never delete, an unfinished session is never stored, and the scan
+   reports incomplete prices on the Today page (`alltickers.coverage`).

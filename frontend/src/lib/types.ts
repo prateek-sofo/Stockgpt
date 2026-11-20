@@ -32,12 +32,14 @@ export interface Idea {
   earnings_today: boolean; days_to_earn: number; shares: number; notional: number; plan: string;
   why: { label: string; key: string; helps: boolean; share: number }[]; headlines: Headline[];
   option?: { contract: string; premium: number; ev: number; p_profit: number; worth_it: boolean; contracts: number };
-  outcome?: { stock_move: number; rel_move: number; correct: boolean; trade_ret: number };
+  outcome?: { stock_move: number; rel_move: number; correct: boolean; trade_ret: number }; beta?: number | null;
 }
 export interface DataUsed { source: string; what: string; through: string | null; status: "ok" | "missing" | "stale" | "estimated" | "partial" | "context"; note: string }
 export interface Brief {
+  revised_after_open?: { longs: string[]; shorts: string[]; beta_long: number | null; beta_short: number | null; reason: string;
+    live_check?: { time: string; on_track: number; scored: number; long_move: number; short_move: number; spy: number | null } };
   data_used?: DataUsed[];
-  world?: World; longs?: Idea[]; shorts?: Idea[]; book?: { per_position: number; positions: number };
+  world?: World; longs?: Idea[]; shorts?: Idea[]; book?: { per_position: number; positions: number; beta_long?: number | null; beta_short?: number | null; beta_neutral?: boolean };
   scan_date: string; generated_for: string; equity: number; universe_size: number; scanned: number;
   market: { premarket_gap: number; news_items: number; regime_vol: number; cal_slope: number };
   options: Ticket[]; stocks: Ticket[]; straddles: Straddle[];
@@ -173,3 +175,27 @@ export interface Light {
   filings: { d: string; title: string; why: string; tone: Tone; form: string; url: string; imp: number }[];
   news: { t: string; h: string; src: string; url: string; tone: Tone }[];
 }
+
+export interface LiveQuote { ticker: string; price: number | null; prev_close: number | null; open: number | null; high: number | null; low: number | null;
+  volume: number | null; state: "pre" | "open" | "closed"; time: string | null; chg_day: number | null; chg_open: number | null }
+export interface LiveOption { contract: string; strike: number; expiry: string; right: "C" | "P"; bid: number | null; ask: number | null; mid: number | null;
+  last: number | null; iv: number | null; volume: number; open_interest: number; spread_pct: number | null; last_trade: string | null; spot: number | null;
+  time: string; suggested: boolean; cost: number | null }
+export interface LiveBoard { as_of: string; scan_date: string; state: "pre" | "open" | "closed" | null; market: Partial<LiveQuote>;
+  rows: { ticker: string; action: "BUY" | "SHORT"; quote: LiveQuote | null; rel_open: number | null; on_track: boolean | null; option: LiveOption | null }[];
+  on_track: number; scored: number; book: number | null; source: string }
+export interface ChainRow { contract: string; strike: number; bid: number | null; ask: number | null; mid: number | null; last: number | null; iv: number | null;
+  volume: number; open_interest: number; spread_pct: number | null; in_the_money: boolean }
+export interface OptionChain { ticker: string; expiry: string; expiries: string[]; spot: number | null; time: string; calls: ChainRow[]; puts: ChainRow[] }
+export interface DayResult { ideas: number; right: number; hit_rate: number | null; long_move: number | null; short_move: number | null; spread: number | null;
+  market_move: number; spy_move: number | null; pnl: number; ret_on_equity: number | null; settled_at: string }
+export interface JournalIdea { ticker: string; name: string; sector: string; action: "BUY" | "SHORT"; strength: string; exp_move_pct: number; ref_price: number;
+  shares: number; notional: number; why: { label: string; helps: boolean }[];
+  outcome?: { open: number; close: number; stock_move: number; rel_move: number; correct: boolean; trade_ret: number; pnl: number } | null;
+  option_outcome?: { contract: string; bought_at: number; sold_at: number; ret: number; from_time: string; to_time: string } }
+export interface JournalDay { date: string; issued_at: string; status: "open" | "settled"; frozen: boolean; revised: string[]; ideas: JournalIdea[];
+  result: DayResult | null; equity: number; captures: { time: string; state: string; spy: number | null;
+    quotes: Record<string, { price: number | null; chg_open: number | null; option: Partial<LiveOption> | null }> }[] }
+export interface JournalIndex { days: { date: string; issued_at: string; status: "open" | "settled"; ideas: number; result: DayResult | null; captures: number }[];
+  tally: { days: number; ideas: number; right: number; hit_rate: number | null; pnl: number; total_return: number; since: string | null };
+  curve: { date: string; equity: number; hit_rate: number | null }[]; generated_at: string }

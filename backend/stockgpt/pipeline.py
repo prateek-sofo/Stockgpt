@@ -95,7 +95,10 @@ def data_used(tables: dict, scan_date) -> list[dict]:
     sofo = lambda k, direct: f"Sofo World ({direct})" if src.get(k) == "Sofo World" else f"{direct}, read directly until Sofo World supplies it"
     px = tables["prices"]
     known = px[px["date"] < scan]["date"].max() if len(px) else None
-    row("Daily prices", "Yahoo Finance, split- and dividend-adjusted", known, note="last close before the scan")
+    from .sources.alltickers import coverage
+    cov = coverage(px[px["date"] < scan]) if len(px) else dict(ok=True, note="")
+    row("Daily prices", "Yahoo Finance, split- and dividend-adjusted", known, "ok" if cov["ok"] else "partial",
+        f"last close before the scan; {cov['note']}")
     has_pre = "premarket" in px and px.loc[px["date"] == scan, "premarket"].notna().any()
     row("Premarket prices", "Yahoo Finance, last trade before 09:00 ET", scan if has_pre else None,
         "ok" if has_pre else "missing", "" if has_pre else "not loaded: opening gaps are not used")
@@ -282,7 +285,7 @@ def run(scan_only: bool = False, reuse: bool = False):
 
     if not scan_only:
         strat = {}
-        TRIALS = 14          # strategy / model variants tried on this data so far (ablation + research + sizing)
+        TRIALS = 16          # strategy / model variants tried on this data so far (ablation + research + sizing)
         for col, key in (("swing", "swing_5d"), ("stock", "stock_daytrade"), ("options", "options_daytrade"),
                          ("straddle", "earnings_straddle")):
             if col not in curve:

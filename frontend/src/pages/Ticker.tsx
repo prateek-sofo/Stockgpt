@@ -5,9 +5,9 @@ import { Link, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import CandleChart from "../components/CandleChart";
 import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, SentDot, Stat, Tabs, ToneDot, TonePill } from "../components/ui";
-import { useApi } from "../lib/api";
+import { STATIC, useApi, useLive } from "../lib/api";
 import { compact, num, pct, tone, TRAIT_LABEL, usd } from "../lib/format";
-import type { Light, TickerProfile } from "../lib/types";
+import type { ChainRow, Light, LiveQuote, OptionChain, TickerProfile } from "../lib/types";
 
 function Full({ data }: { data: TickerProfile }) {
   const [range, setRange] = useState<"60" | "120" | "260">("120");
@@ -153,6 +153,54 @@ function Full({ data }: { data: TickerProfile }) {
   );
 }
 
+function LiveCard({ sym }: { sym: string }) {
+  const [expiry, setExpiry] = useState<string | null>(null);
+  const { data: qs } = useLive<Record<string, LiveQuote>>(`live/quotes?symbols=${sym}`, 30000);
+  const { data: ch, error } = useLive<OptionChain>(`live/options/${sym}${expiry ? `?expiry=${expiry}` : ""}`, 90000);
+  const q = qs?.[sym];
+  const rows = ch ? ch.calls.map((c) => ({ c, p: ch.puts.find((x) => x.strike === c.strike) })) : [];
+  const cell = (r?: ChainRow) => (r ? <>
+    <td className="num px-2 py-1.5 text-right">{r.bid == null ? "–" : r.bid.toFixed(2)}</td>
+    <td className="num px-2 text-right">{r.ask == null ? "–" : r.ask.toFixed(2)}</td>
+    <td className="num px-2 text-right text-ink-400">{r.iv == null ? "–" : pct(r.iv, 0, false)}</td>
+    <td className="num px-2 text-right text-ink-400">{r.volume.toLocaleString()}</td></> : <td colSpan={4} />);
+  return (
+    <Card className="mb-4" title={<span className="flex items-center gap-2"><span className={clsx("h-2 w-2 rounded-full", q?.state === "open" ? "animate-pulse bg-up" : "bg-ink-400")} />
+      Live price and options</span>}
+      right={<span className="text-[12.5px] text-ink-400">Yahoo quotes, can lag up to 15 min · refreshes on its own</span>}>
+      {q ? (
+        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+          <span className="num text-[30px] font-semibold text-ink-100">{usd(q.price, 2)}</span>
+          <span className="text-[14px] text-ink-300">today <b className={clsx("num", tone(q.chg_day))}>{pct(q.chg_day, 2)}</b></span>
+          <span className="text-[14px] text-ink-300">since the open <b className={clsx("num", tone(q.chg_open))}>{pct(q.chg_open, 2)}</b></span>
+          <span className="text-[14px] text-ink-400">range {usd(q.low, 2)} to {usd(q.high, 2)} · {compact(q.volume)} shares</span>
+          <span className="text-[13px] text-ink-400">{q.state === "open" ? "market open" : q.state === "pre" ? "before the open" : "market closed"}{q.time && ` · ${new Date(q.time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`}</span>
+        </div>) : <div className="text-[14px] text-ink-400">Fetching the live price…</div>}
+      {ch ? (<>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span className="label">Options expiring</span>
+          {ch.expiries.slice(0, 8).map((e) => (
+            <button key={e} onClick={() => setExpiry(e)} className={clsx("rounded-lg border px-2.5 py-1 text-[12.5px]", e === ch.expiry ? "border-accent bg-accent/10 text-ink-100" : "border-ink-700 text-ink-400 hover:text-ink-100")}>{day(e)}</button>))}
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead><tr className="text-ink-500">
+              <th colSpan={4} className="border-b border-ink-700 px-2 py-1.5 text-center font-medium text-up">Calls (profit if the stock rises)</th>
+              <th className="border-b border-ink-700 px-3 font-medium">Strike</th>
+              <th colSpan={4} className="border-b border-ink-700 px-2 text-center font-medium text-down">Puts (profit if the stock falls)</th></tr>
+            <tr className="text-ink-500">{["Bid", "Ask", "Implied vol.", "Volume"].map((h) => <th key={h} className="px-2 py-1 text-right font-medium">{h}</th>)}<th />
+              {["Bid", "Ask", "Implied vol.", "Volume"].map((h) => <th key={"p" + h} className="px-2 text-right font-medium">{h}</th>)}</tr></thead>
+            <tbody>{rows.map(({ c, p }) => (
+              <tr key={c.strike} className={clsx("border-t border-ink-800/70", ch.spot != null && Math.abs(c.strike - ch.spot) === Math.min(...rows.map((r) => Math.abs(r.c.strike - ch.spot!))) && "bg-accent/10")}>
+                {cell(c)}<td className="num px-3 text-center font-semibold text-ink-100">{c.strike}</td>{cell(p)}</tr>))}</tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[12.5px] text-ink-500">Prices are per share; one contract covers 100 shares. The highlighted row is the strike closest to the current price. Bid is what you can sell at, ask is what you pay.</p>
+      </>) : <div className="mt-3 text-[13.5px] text-ink-400">{error ? "No listed options found for this ticker, or the quote service is busy." : "Fetching the option chain…"}</div>}
+    </Card>
+  );
+}
+
 const day = (s: string) => new Date(s.length > 10 ? s : s + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
 export default function Ticker() {
@@ -177,6 +225,7 @@ export default function Ticker() {
         right={d.price != null ? <div className="text-right"><div className="num text-[28px] font-semibold">{usd(d.price, 2)}</div>
           <div className={clsx("num text-[13px]", tone(d.chg.d1))}>{pct(d.chg.d1, 1)} on {day(d.as_of!)}</div></div> : <Pill color="amber">No current price</Pill>} />
 
+      {!STATIC && <LiveCard sym={S} />}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.25fr_1fr]">
         <Card title="In plain words">
           <p className="text-[16px] font-medium leading-snug text-ink-100">{d.summary.line}</p>

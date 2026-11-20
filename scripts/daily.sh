@@ -8,6 +8,12 @@
 #   scripts/daily.sh scan      tracker + today's model ideas. Needs the price history and backtest
 #                              from one earlier `scripts/local.sh real` (or `daily.sh full`).
 #   scripts/daily.sh full      weekly: refresh SEC bulk files, retrain, rerun the walk-forward backtest.
+#   scripts/daily.sh capture   during the session (for example 09:40 and 15:50 ET): note live stock and
+#                              option quotes for today's predictions.
+#   scripts/daily.sh close     after 16:15 ET: today's closing prices, mark every prediction right or
+#                              wrong, update the track record.
+#
+# A weekday on a machine that stays on:  08:40 scan · 09:40 capture · 15:50 capture · 16:30 close
 #
 # Data: set SOFO_WORLD_URL and SOFO_WORLD_KEY (a Sofo World service key, read scope) and news,
 # financials, filings and earnings dates come from Sofo World, the one place that scrapes.
@@ -25,6 +31,18 @@ PY=${PYTHON:-python3}
 mkdir -p "$SEC" "$ART"
 cd "$ROOT/backend"
 step() { echo; echo "== $* ($(date -u +%H:%M) UTC)"; }
+
+if [[ $MODE == capture ]]; then $PY -m stockgpt.journal capture; "$ROOT/scripts/snapshot.sh"; exit 0; fi
+if [[ $MODE == close ]]; then
+  step "closing prices"
+  $PY -m stockgpt.sources.alltickers
+  step "mark today's predictions"
+  $PY -m stockgpt.journal settle
+  $PY -m stockgpt.tracker
+  "$ROOT/scripts/snapshot.sh"
+  echo; echo "done. Commit published/journal/ to keep the record."
+  exit 0
+fi
 
 SOFO=${SOFO_DATABASE_URL:-}${SOFO_NEWS_URI:-}
 from() { $PY -c "import json;print(json.load(open('$RAW/sources.json')).get('$1',''))" 2>/dev/null || true; }
@@ -87,6 +105,8 @@ if [[ $MODE != tracker ]]; then
   export STOCKGPT_RETRAIN_DAYS=63
   if [[ $MODE == full || ! -s $ART/backtest.json ]]; then $PY -m stockgpt.indexfunds; $PY -m stockgpt.pipeline
   else $PY -m stockgpt.pipeline --scan; fi
+  step "record today's predictions (locked once the market opens)"
+  $PY -m stockgpt.journal issue || true
   mkdir -p "$ROOT/published"                       # small results a tracker-only machine can reuse
   for f in brief backtest accuracy research ablation universe longterm meta; do cp "$ART/$f.json" "$ROOT/published/" 2>/dev/null || true; done
 else

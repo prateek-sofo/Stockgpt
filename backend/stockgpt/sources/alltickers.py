@@ -46,24 +46,69 @@ def build(days: int = 400, fresh: bool = True) -> pd.DataFrame:
 
 
 def merge_into_model_prices() -> None:
-    """Bring prices.parquet (the model's long history) up to date from the all-ticker table."""
+    """Bring prices.parquet (the model's long history) up to date from the all-ticker table. Rows are
+    added or replaced one (date, ticker) at a time: a ticker missing from today's download keeps the
+    rows it already had, so a throttled download can never punch holes in the history."""
     old = pd.read_parquet(DATA_DIR / "prices.parquet")
     old["date"] = pd.to_datetime(old["date"]).dt.normalize()
     new = pd.read_parquet(OUT)
-    cut = old["date"].max() - pd.Timedelta(days=7)
-    new = new[(new["date"] > cut) & new["ticker"].isin(set(old["ticker"]))]
     cols = [c for c in old.columns if c in new.columns]           # extra columns (premarket) are re-attached by assemble
-    df = pd.concat([old.loc[old["date"] <= cut, cols], new[cols]], ignore_index=True)
+    cut = old["date"].max() - pd.Timedelta(days=30)
+    new = new[(new["date"] > cut) & new["ticker"].isin(set(old["ticker"]))].dropna(subset=["open", "close"])
+    df = pd.concat([old[cols], new[cols]], ignore_index=True)
     df = df.drop_duplicates(["date", "ticker"], keep="last").sort_values(["date", "ticker"])
     df.to_parquet(DATA_DIR / "prices.parquet", index=False)
-    print(f"model prices now through {df['date'].max():%Y-%m-%d}")
+    print(f"model prices now through {df['date'].max():%Y-%m-%d}; {coverage(df)['note']}")
+
+
+def coverage(prices: pd.DataFrame, sessions: int = 15, tolerance: float = 0.02) -> dict:
+    """Are the recent sessions complete? Compares each of the last sessions' stock count with the
+    typical count over the two months before. A short day means a download was cut off."""
+    n = prices.dropna(subset=["close"]).groupby("date")["ticker"].nunique().sort_index()
+    recent, base = n.tail(sessions), n.iloc[-(sessions + 40):-sessions]
+    typical = float(base.median()) if len(base) else float(recent.max())
+    short = recent[recent < typical * (1 - tolerance)]
+    ok = short.empty
+    note = (f"complete: about {typical:,.0f} stocks on each of the last {len(recent)} sessions" if ok else
+            f"INCOMPLETE: {len(short)} of the last {len(recent)} sessions are missing stocks "
+            f"(worst {pd.Timestamp(short.idxmin()):%b %d}: {int(short.min()):,} of about {typical:,.0f})")
+    return dict(ok=ok, note=note, short_days=[str(pd.Timestamp(d).date()) for d in short.index], typical=typical)
+
+
+def repair(days: int = 45) -> None:
+    """Refetch the recent history of the model's own tickers and fill any holes."""
+    old = pd.read_parquet(DATA_DIR / "prices.parquet")
+    old["date"] = pd.to_datetime(old["date"]).dt.normalize()
+    start = (old["date"].max() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+    tick = sorted(set(old["ticker"]))
+    cache = DATA_DIR / "prices" / "yahoo_repair"
+    if cache.exists():
+        shutil.rmtree(cache)
+    got = yahoo(tick, start, cache_dir=cache, threads=2, pause_s=2.0)
+    missing = sorted(set(tick) - set(got["ticker"]))
+    if missing:                                    # second, slower pass for whatever was throttled
+        print(f"  retrying {len(missing)} tickers", flush=True)
+        import time
+        time.sleep(60)
+        more = yahoo(missing, start, batch=50, cache_dir=cache / "retry", threads=False, pause_s=3.0)
+        got = pd.concat([got, more], ignore_index=True)
+    got["date"] = pd.to_datetime(got["date"]).dt.normalize()
+    cols = [c for c in old.columns if c in got.columns]
+    df = pd.concat([old[cols], got.dropna(subset=["open", "close"])[cols]], ignore_index=True)
+    df = df.drop_duplicates(["date", "ticker"], keep="last").sort_values(["date", "ticker"])
+    df.to_parquet(DATA_DIR / "prices.parquet", index=False)
+    print(f"repair: {got['ticker'].nunique():,} of {len(tick):,} tickers refetched; {coverage(df)['note']}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=400)
     ap.add_argument("--merge", action="store_true", help="also update the model's prices.parquet")
+    ap.add_argument("--repair", action="store_true", help="refetch the model tickers' recent history and fill holes")
     a = ap.parse_args()
+    if a.repair:
+        repair()
+        raise SystemExit
     px = build(a.days)
     print(f"all tickers: {px['ticker'].nunique():,} with prices, through {px['date'].max():%Y-%m-%d}")
     if a.merge:

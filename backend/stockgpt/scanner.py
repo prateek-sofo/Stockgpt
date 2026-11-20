@@ -97,6 +97,16 @@ def explain(model: HierarchicalModel, row: pd.Series, top: int = 4) -> list[dict
             for i in idx if abs(contrib[i]) > 1e-4]
 
 
+def market_betas(prices: pd.DataFrame, scan_date, window: int = 60) -> pd.Series:
+    """How much each stock has moved per 1% move in the average stock, over the last `window`
+    sessions before the scan. (The model's own beta feature is a rank, not this number.)"""
+    px = prices[prices["date"] < pd.Timestamp(scan_date)]
+    px = px[px["date"] >= px["date"].max() - pd.Timedelta(days=int(window * 1.6))]
+    r = px.pivot(index="date", columns="ticker", values="close").pct_change().iloc[1:].tail(window)
+    m = r.mean(axis=1)
+    return r.apply(lambda c: c.cov(m)) / m.var()
+
+
 def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_date=None,
              equity: float | None = None, top_n: int = 8) -> dict:
     equity = equity or SETTINGS.risk.starting_capital
@@ -168,6 +178,7 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
     opt = liq.nlargest(top_n, "ev")
     stk = liq.nlargest(top_n, "exp_ret")
     # ---- ranked ideas: what the model would buy and short today (it ranks stocks against the market) ----
+    from .backtest import pick_sides
     liq = liq.assign(score_pct=liq["mu"].rank(pct=True))
     notional = equity * r_.stock_leverage / (2 * r_.rank_k)
 
@@ -208,8 +219,15 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
         return out
 
     n_ideas = 10
-    longs = ideas(liq.nlargest(n_ideas, "mu"), "BUY")
-    shorts = ideas(liq.nsmallest(n_ideas, "mu"), "SHORT")
+    top, bottom = pick_sides(liq, n_ideas)             # shown ideas: the strongest of each beta group, both sides
+    longs, shorts = ideas(top, "BUY"), ideas(bottom, "SHORT")
+    betas = market_betas(tables["prices"], scan_date)
+    def _beta(part):
+        v = betas.reindex(part.index.get_level_values("ticker")).mean() if len(part) else np.nan
+        return round(float(v), 2) if pd.notna(v) else None
+    for part, items in ((top, longs), (bottom, shorts)):
+        for tk, item in zip(part.index.get_level_values("ticker"), items):
+            item["beta"] = round(float(betas[tk]), 2) if tk in betas.index and pd.notna(betas[tk]) else None
 
     option_tickets = [dict(ticket(tk, r, "option"), qualifies=(d, tk) in opt_q) for (d, tk), r in opt.iterrows()]
     stock_tickets = [dict(ticket(tk, r, "stock"), qualifies=(d, tk) in stk_q) for (d, tk), r in stk.iterrows()]
@@ -260,10 +278,12 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
     return dict(
         world=world,
         scan_date=str(scan_date.date()), generated_for="09:00 ET premarket",
+        option_expiry=str(expiry.date()), universe=sorted(liquid.index.get_level_values("ticker")),
         equity=equity, universe_size=int(liquid.shape[0]), scanned=int(sig.shape[0]),
         market=dict(premarket_gap=float(today["mkt_gap"].iloc[0]), news_items=int(today["news_on_count"].sum()),
                     regime_vol=float(today["rv20"].median()), cal_slope=model.cal_slope),
-        longs=longs, shorts=shorts, book=dict(per_position=round(notional, 2), positions=2 * r_.rank_k),
+        longs=longs, shorts=shorts, book=dict(per_position=round(notional, 2), positions=2 * r_.rank_k,
+                                               beta_long=_beta(top), beta_short=_beta(bottom), beta_neutral=r_.beta_neutral),
         options=option_tickets, stocks=stock_tickets, straddles=straddles[:12],
         thresholds=dict(min_prob=r_.min_edge_prob, min_ev=r_.min_ev),
         qualified=dict(options=len(opt_q), stocks=len(stk_q)),

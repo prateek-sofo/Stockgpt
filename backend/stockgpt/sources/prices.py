@@ -102,7 +102,8 @@ def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0
         frames.append(df)
         print(f"  batch {i // batch + 1}/{-(-len(syms) // batch)}: {df['ticker'].nunique()} tickers", flush=True)
         time.sleep(pause_s)
-    return pd.concat([f for f in frames if len(f)], ignore_index=True)
+    from ..sessions import closed_only
+    return closed_only(pd.concat([f for f in frames if len(f)], ignore_index=True))   # never an unfinished session
 
 
 def tiingo(tickers: list[str], start: str, min_interval_s: float = 0.1) -> pd.DataFrame:

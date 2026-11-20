@@ -90,7 +90,7 @@ def expected_iv_at_open(df: pd.DataFrame):
 SIGNAL_COLS = ["open_px", "close_px", "prev_close", "high_px", "low_px", "r_oc", "r_cc", "r_fwd5", "r_fwd20", "z_oc", "z_x", "z5_x", "y_dir",
                "sig_d", "rv20", "is_earnings", "days_to_earn", "hist_earn_move", "eps_surprise", "iv30", "ivw_prev",
                "ivw_t", "gap_pre", "gap_pre_z", "atm_spread", "log_adv20", "log_opt_vol20", "news_on_count",
-               "news_on_wsent", "mkt_gap"]
+               "news_on_wsent", "mkt_gap", "beta_60"]
 
 
 def build_signals(panel: pd.DataFrame, preds: pd.DataFrame, slim: bool = False) -> pd.DataFrame:
@@ -150,6 +150,42 @@ def calibrate_ev(df: pd.DataFrame, min_days: int = 60) -> np.ndarray:
     return a[pos] + b[pos] * df["ev"].clip(-1, 1).values
 
 
+def rank_score(day: pd.DataFrame) -> pd.Series:
+    """The score stocks are ranked on within one day. The raw prediction often lines up with how
+    strongly a stock follows the market (its beta), which turns a long/short book into a hidden bet
+    on the market's direction. Here the part of the score explained by beta is removed first, so the
+    longs and the shorts carry similar market sensitivity. On 1,723 out-of-sample days this cut the
+    worst drawdown from -44% to -35% with the same hit rate (docs/RESEARCH.md)."""
+    mu = day["mu"]
+    if not SETTINGS.risk.beta_neutral or "beta_60" not in day or len(day) < 20:
+        return mu
+    beta = day["beta_60"].astype(float)
+    b = beta.fillna(beta.median()).rank(pct=True) - 0.5
+    var = float(b.var())
+    if not np.isfinite(var) or var <= 0:
+        return mu
+    slope = float(np.cov(mu.astype(float), b)[0, 1]) / var
+    return mu - slope * b
+
+
+def pick_sides(liq: pd.DataFrame, k: int, buckets: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The k stocks to buy and the k to short on one day. With beta_neutral on, the day's stocks are
+    split into five groups by market sensitivity and the strongest and weakest k/5 are taken inside
+    each group, so every buy has a short of similar beta and the two books move alike with the
+    market. Removing beta from the score alone (rank_score) balances the books on average but can
+    leave a large gap on a given day; matching inside groups bounds it every day."""
+    if not SETTINGS.risk.beta_neutral or "beta_60" not in liq or len(liq) < 10 * buckets or k < buckets:
+        liq = liq.assign(rank_mu=rank_score(liq))
+        return liq.nlargest(k, "rank_mu"), liq.nsmallest(k, "rank_mu")
+    beta = liq["beta_60"].astype(float)
+    grp = pd.qcut(beta.fillna(beta.median()).rank(method="first"), buckets, labels=False)
+    liq = liq.assign(rank_mu=liq["mu"] - liq["mu"].groupby(grp).transform("mean"))     # score relative to its beta group
+    per = k // buckets
+    longs = pd.concat([g.nlargest(per, "mu") for _, g in liq.groupby(grp)])
+    shorts = pd.concat([g.nsmallest(per, "mu") for _, g in liq.groupby(grp)])
+    return longs.sort_values("rank_mu", ascending=False), shorts.sort_values("rank_mu")
+
+
 def _select_stock(day: pd.DataFrame, n: int):
     """Stock day trades: rank by expected return in bps after round-trip slippage."""
     cost = 2 * SETTINGS.costs.stock_slippage_bps / 1e4
@@ -161,8 +197,10 @@ def _select_stock(day: pd.DataFrame, n: int):
         # relative ranking: top k long, bottom k short whatever the sign of mu (equal books = market-neutral)
         if len(liq) < 2 * k:
             return liq.iloc[:0]
-        longs = liq.nlargest(k, "mu").assign(side="CALL")
-        shorts = liq.nsmallest(k, "mu").assign(side="PUT")
+        if liq["r_oc"].notna().any():              # a stock with no open or close that day cannot be traded or marked
+            liq = liq[liq["r_oc"].notna()]
+        longs, shorts = pick_sides(liq, k)
+        longs, shorts = longs.assign(side="CALL"), shorts.assign(side="PUT")
         out = pd.concat([longs, shorts])
         sign = np.where(out["side"] == "CALL", 1, -1)
         out["stock_ret"] = sign * out["r_oc"] - 2 * SETTINGS.costs.stock_slippage_bps / 1e4

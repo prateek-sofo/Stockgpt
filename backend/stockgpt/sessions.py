@@ -37,3 +37,13 @@ def add_pending_session(prices: pd.DataFrame, premarket: pd.DataFrame | None = N
         pending = pending.merge(pm, on="ticker", how="left")
     pending["date"] = pending["date"].astype(prices["date"].dtype)
     return pd.concat([prices, pending], ignore_index=True)
+
+
+def closed_only(prices: pd.DataFrame, now: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Drop the bar of a session that has not finished. A daily download made during market hours
+    includes today's bar with the current price as its "close"; storing it would let the model treat
+    an unfinished day as history. A session counts as closed from 16:15 New York time."""
+    now = now or pd.Timestamp.now("America/New_York")
+    today = now.tz_localize(None).normalize()
+    last_closed = today if (now.hour, now.minute) >= (16, 15) else today - pd.Timedelta(days=1)
+    return prices[pd.to_datetime(prices["date"]) <= last_closed]

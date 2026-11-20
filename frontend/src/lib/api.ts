@@ -36,3 +36,22 @@ export function useApi<T>(path: string | null) {
   }, [path]);
   return { data, error };
 }
+
+/** Live data: fetched fresh every `everyMs` (never cached). In a published snapshot there is no server
+ *  to ask, so the copy captured when the snapshot was built is shown once, with its own timestamp. */
+export function useLive<T>(path: string | null, everyMs = 30000) {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!path) { setData(null); return; }
+    let live = true;
+    const load = () => fetch(STATIC ? `data/${path.split("?")[0]}.json` : `/api/${path}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(STATIC ? "live prices need the running app" : r.statusText))))
+      .then((d) => { if (live) { setData(d as T); setError(null); } })
+      .catch((e) => live && setError(String(e.message ?? e)));
+    load();
+    const id = STATIC ? undefined : setInterval(load, everyMs);
+    return () => { live = false; if (id) clearInterval(id); };
+  }, [path, everyMs]);
+  return { data, error };
+}

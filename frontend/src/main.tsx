@@ -6,6 +6,7 @@ import Layout from "./components/Layout";
 import "./index.css";
 import Data from "./pages/Data";
 import Performance from "./pages/Performance";
+import Record from "./pages/Record";
 import Stocks from "./pages/Stocks";
 import Today from "./pages/Today";
 import Longterm from "./pages/Longterm";
@@ -22,6 +23,7 @@ createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<Today />} />
+          <Route path="record" element={<Record />} />
           <Route path="market" element={<Market />} />
           <Route path="stocks" element={<Stocks />} />
           <Route path="performance" element={<Performance />} />

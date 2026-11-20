@@ -11,10 +11,14 @@ cd "$ROOT/frontend"
 rm -rf "$OUT"; mkdir -p "$OUT/data/tickers" "$OUT/data/light"
 VITE_STATIC=1 npx vite build --base ./ --outDir "$OUT" --emptyOutDir false >/dev/null
 sed -i '1s/<!doctype html>/<!DOCTYPE html>/' "$OUT/index.html"
-for f in brief backtest accuracy research ablation universe longterm meta market all; do
+for f in brief backtest accuracy research ablation universe longterm meta market all journal; do
   [[ -f $ART/$f.json ]] && cp "$ART/$f.json" "$OUT/data/"
 done
 cp "$ART"/light/*.json "$OUT/data/light/" 2>/dev/null || true
+mkdir -p "$OUT/data/journal" "$OUT/data/live"
+cp "$ART"/journal/*.json "$OUT/data/journal/" 2>/dev/null || true
+# live prices cannot be fetched from a static copy: include the last set captured, with its timestamp
+[[ -f $ART/live.json ]] && cp "$ART/live.json" "$OUT/data/live/board.json"
 # full model pages: today's ideas, then the most traded names, up to 150 files
 python3 - "$ART" "$OUT" <<'PY'
 import json, shutil, sys, pathlib
