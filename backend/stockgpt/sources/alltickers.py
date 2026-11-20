@@ -31,13 +31,13 @@ def listed() -> pd.DataFrame:
     return t.drop_duplicates("ticker")[["ticker", "name", "cik", "exchange"]]
 
 
-def build(days: int = 400, fresh: bool = True) -> pd.DataFrame:
+def build(days: int = 400, fresh: bool = True, refresh: bool = False) -> pd.DataFrame:
     t = listed()
     t.to_parquet(LISTED, index=False)
     start = (pd.Timestamp.now("UTC").normalize() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
     cache = DATA_DIR / "prices" / "yahoo_all"
-    if fresh and cache.exists() and not any(cache.glob(f"*_{start}.parquet")):
-        shutil.rmtree(cache)                       # yesterday's batches: refetch
+    if cache.exists() and (refresh or (fresh and not any(cache.glob(f"*_{start}.parquet")))):
+        shutil.rmtree(cache)                       # yesterday's batches, or a same-day rerun after the close: refetch
     px = yahoo(t["ticker"].tolist(), start, cache_dir=cache, threads=2, pause_s=2.0)   # two connections at a time
     px["date"] = pd.to_datetime(px["date"]).dt.normalize()
     px = px.drop_duplicates(["date", "ticker"]).sort_values(["ticker", "date"])
@@ -104,12 +104,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=400)
     ap.add_argument("--merge", action="store_true", help="also update the model's prices.parquet")
+    ap.add_argument("--refresh", action="store_true", help="ignore batches downloaded earlier today (use after the close)")
     ap.add_argument("--repair", action="store_true", help="refetch the model tickers' recent history and fill holes")
     a = ap.parse_args()
     if a.repair:
         repair()
         raise SystemExit
-    px = build(a.days)
+    px = build(a.days, refresh=a.refresh)
     print(f"all tickers: {px['ticker'].nunique():,} with prices, through {px['date'].max():%Y-%m-%d}")
     if a.merge:
         merge_into_model_prices()

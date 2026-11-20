@@ -35,7 +35,7 @@ step() { echo; echo "== $* ($(date -u +%H:%M) UTC)"; }
 if [[ $MODE == capture ]]; then $PY -m stockgpt.journal capture; "$ROOT/scripts/snapshot.sh"; exit 0; fi
 if [[ $MODE == close ]]; then
   step "closing prices"
-  $PY -m stockgpt.sources.alltickers
+  $PY -m stockgpt.sources.alltickers --refresh
   step "mark today's predictions"
   $PY -m stockgpt.journal settle
   $PY -m stockgpt.tracker
