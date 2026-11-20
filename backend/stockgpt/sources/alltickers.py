@@ -52,7 +52,8 @@ def merge_into_model_prices() -> None:
     new = pd.read_parquet(OUT)
     cut = old["date"].max() - pd.Timedelta(days=7)
     new = new[(new["date"] > cut) & new["ticker"].isin(set(old["ticker"]))]
-    df = pd.concat([old[old["date"] <= cut], new[old.columns]], ignore_index=True)
+    cols = [c for c in old.columns if c in new.columns]           # extra columns (premarket) are re-attached by assemble
+    df = pd.concat([old.loc[old["date"] <= cut, cols], new[cols]], ignore_index=True)
     df = df.drop_duplicates(["date", "ticker"], keep="last").sort_values(["date", "ticker"])
     df.to_parquet(DATA_DIR / "prices.parquet", index=False)
     print(f"model prices now through {df['date'].max():%Y-%m-%d}")

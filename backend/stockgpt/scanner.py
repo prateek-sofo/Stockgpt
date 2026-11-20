@@ -124,7 +124,7 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
     dte = max(1, (expiry - scan_date).days)
 
     def ticket(tk, row, kind):
-        S = float(row["open_px"]) if pd.notna(row["open_px"]) else float(row["prev_close"] * np.exp(row["gap_pre"] or 0))
+        S = float(row["open_px"]) if pd.notna(row["open_px"]) else float(row["prev_close"] * np.exp(row["gap_pre"] if pd.notna(row["gap_pre"]) else 0.0))
         known_outcome = pd.notna(row.get("close_px"))
         base = dict(
             ticker=tk, name=meta.at[tk, "name"], sector=meta.at[tk, "sector"], kind=kind,
@@ -178,7 +178,7 @@ def run_scan(panel: pd.DataFrame, tables: dict, model: HierarchicalModel, scan_d
         out = []
         for ((d, tk), r), w in zip(part.iterrows(), why):
             buy = action == "BUY"
-            S = float(r["open_px"]) if pd.notna(r["open_px"]) else float(r["prev_close"] * np.exp(r["gap_pre"] or 0))
+            S = float(r["open_px"]) if pd.notna(r["open_px"]) else float(r["prev_close"] * np.exp(r["gap_pre"] if pd.notna(r["gap_pre"]) else 0.0))
             pct_ = float(r["score_pct"])
             edge = pct_ if buy else 1 - pct_
             strength = "Strong" if edge >= 0.99 else "Solid" if edge >= 0.97 else "Moderate"

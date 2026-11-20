@@ -9,9 +9,10 @@
 #                              from one earlier `scripts/local.sh real` (or `daily.sh full`).
 #   scripts/daily.sh full      weekly: refresh SEC bulk files, retrain, rerun the walk-forward backtest.
 #
-# Data: set SOFO_DATABASE_URL (read-only role) or SOFO_NEWS_URI (s3:// or folder dump) and news,
-# financials, filings and earnings dates come from Sofo World, the one place that scrapes. Without
-# either, the same public sources are read directly (SEC EDGAR, Yahoo headlines); set SEC_CONTACT
+# Data: set SOFO_WORLD_URL and SOFO_WORLD_KEY (a Sofo World service key, read scope) and news,
+# financials, filings and earnings dates come from Sofo World, the one place that scrapes.
+# SOFO_DATABASE_URL (read-only role) or SOFO_NEWS_URI (s3:// or folder dump) work too. Without
+# any of them, the same public sources are read directly (SEC EDGAR, Yahoo headlines); set SEC_CONTACT
 # to your email for that (the SEC asks automated clients to name a contact). Prices (Yahoo) and
 # rates (FRED) are read here in both cases until Sofo World carries them.
 set -euo pipefail
@@ -28,15 +29,20 @@ step() { echo; echo "== $* ($(date -u +%H:%M) UTC)"; }
 SOFO=${SOFO_DATABASE_URL:-}${SOFO_NEWS_URI:-}
 from() { $PY -c "import json;print(json.load(open('$RAW/sources.json')).get('$1',''))" 2>/dev/null || true; }
 rm -f "$RAW/sources.json"
-if [[ -n $SOFO ]]; then
-  # Sofo World is the one place that scrapes: news, financials, filings, earnings dates, competitor graph.
-  # Each table is used only if it covers enough of the market; the script says which ones were.
+sofo_api() { $PY -m stockgpt.sources.sofo_api || echo "Sofo World API not available"; }
+if [[ -n ${SOFO_WORLD_URL:-} ]]; then
+  # Sofo World is the one place that scrapes. Its API hands over everything new since the last run:
+  # news, events, competitor graph, financials, filings. Works from any machine with the URL and a key.
+  step "Sofo World API: news, events, competitor graph, financials, filings"
+  sofo_api
+elif [[ -n $SOFO ]]; then
+  # Same data, read from the database (read-only role) or from an S3 / folder dump.
   step "Sofo World: financials, filings, earnings dates"
   $PY -m stockgpt.sources.sofo_finance || echo "Sofo World financials not available"
   step "Sofo World: news, events, competitor graph"
   $PY -m stockgpt.sources.sofo_world --since 2018-01-01 || echo "Sofo World news not available"
 else
-  echo "SOFO_DATABASE_URL / SOFO_NEWS_URI not set: reading the public sources directly"
+  echo "SOFO_WORLD_URL (or SOFO_DATABASE_URL / SOFO_NEWS_URI) not set: reading the public sources directly"
 fi
 
 # Anything Sofo World did not supply is read directly from the same public source, for now.
@@ -71,6 +77,10 @@ fi
 
 if [[ $MODE != tracker ]]; then
   [[ -s $RAW/prices.parquet && -s $RAW/sec_fundamentals.parquet ]] || { echo "no model history here: run scripts/local.sh real once, or use 'tracker'"; exit 1; }
+  if [[ -n ${SOFO_WORLD_URL:-} ]]; then
+    step "Sofo World API: news published since the first pull"     # the scan sees articles up to this minute
+    sofo_api
+  fi
   step "model"
   $PY -m stockgpt.sources.snapshots premarket || true
   $PY -m stockgpt.sources.assemble --start 2019-01-01

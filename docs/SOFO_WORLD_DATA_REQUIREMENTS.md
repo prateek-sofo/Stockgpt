@@ -225,9 +225,14 @@ StockGPT.
 
 ### D1. Delivery
 
-Either route works; the readers for both exist.
+Three routes work; the readers for all three exist.
 
-1. **Files on S3** (simplest): `s3://<bucket>/stockgpt/` with one folder per table, Parquet or CSV,
+0. **Sofo World's API** (preferred: one URL and one key, from any machine): `/v1/exports/news`,
+   `/events`, `/relationships`, `/sec`, paged by the time Sofo World recorded each row, with a cursor
+   StockGPT stores. The route is written and tested locally; it is a patch for the Sofo World
+   repository (`infra/sofo-world/` in StockGPT, branch `claude/stockgpt-exports` there) and needs to be
+   merged, deployed and exposed for a service key (`docs/requests/stockgpt_exports.md` in the patch).
+1. **Files on S3**: `s3://<bucket>/stockgpt/` with one folder per table, Parquet or CSV,
    written once a day before 08:45 ET. `infra/aws/export_news.sh` produces exactly this from the
    Sofo World database: `news_articles/`, `article_mentions/`, `entity_identifiers/`, `events/`,
    `relationships/`, `observations/` (financial metric points and filing records), and optionally
@@ -238,7 +243,8 @@ Either route works; the readers for both exist.
 
 Only public, owned data: nothing from the `vendor` schema and nothing from the people graph.
 
-Then, where StockGPT runs: set `SOFO_NEWS_URI` or `SOFO_DATABASE_URL` and run `scripts/daily.sh`.
+Then, where StockGPT runs: set `SOFO_WORLD_URL` and `SOFO_WORLD_KEY` (or `SOFO_NEWS_URI`, or
+`SOFO_DATABASE_URL`) and run `scripts/daily.sh`.
 
 ### D2. Acceptance checks StockGPT runs on the first delivery
 

@@ -111,3 +111,49 @@ def test_sofo_world_financials_and_filings():
     assert list(out["filings"]["title"]) == ["Reported financial results"]            # the 13F is not company news
     e = out["earnings"].iloc[0]
     assert e["timing"] == "AMC" and bool(e["timing_known"]) and str(e["report_date"].date()) == "2025-05-01"
+
+
+def test_sofo_api_sync_is_incremental_and_point_in_time(tmp_path, monkeypatch):
+    """Pages are pulled from the stored cursor; an article found late is never dated before Sofo World had it."""
+    import httpx
+    from stockgpt.sources import sofo_api
+    monkeypatch.setattr(sofo_api, "STORE", tmp_path)
+    art = lambda i, pub, seen, m: dict(article_id=f"a{i}", first_seen=seen, published_at=pub, title=f"Acme story {i}", snippet="s",
+                                       url=f"https://n/{i}", publisher="Wire", is_press_release=False, cluster_id=None, mentions=m)
+    acme = [dict(ticker="ACME", cik="42", salience=0.9, is_subject=True)]
+    pages = {None: dict(rows=[art(1, "2026-11-17T21:30:00+00:00", "2026-11-17T21:40:00+00:00", acme),
+                              art(2, "2026-11-10T12:00:00+00:00", "2026-11-18T09:00:00+00:00", acme)], next="c1", more=True),
+             "c1": dict(rows=[art(3, "2026-11-18T11:00:00+00:00", "2026-11-18T11:01:00+00:00",
+                                  [dict(ticker=None, cik="42", salience=0.2, is_subject=False)])], next="c2", more=False),
+             "c2": dict(rows=[], next=None, more=False)}
+    calls = []
+    def handler(req):
+        assert req.headers["authorization"] == "Bearer sk_world_test" and req.url.path == "/v1/exports/news"
+        calls.append(req.url.params.get("after"))
+        return httpx.Response(200, json=pages[req.url.params.get("after")])
+    c = sofo_api.client("https://sofo.test", "sk_world_test", transport=httpx.MockTransport(handler))
+    assert sofo_api.sync(c, "news") == 3 and calls == [None, "c1"]
+    assert sofo_api.sync(c, "news") == 0 and calls[-1] == "c2"          # the next run starts where the last ended
+    out = sofo_api.news_table(sofo_api.load("news"), pd.DataFrame())
+    assert list(out["headline"]) == ["Acme story 2", "Acme story 1"]    # story 3 only mentions Acme in passing
+    late = out.set_index("headline").loc["Acme story 2", "published_at"]
+    assert str(late) == "2026-11-10 18:00:00+00:00"                     # found 8 days late: capped at publication + 6 h
+
+
+def test_same_headline_on_another_day_is_another_story():
+    from stockgpt.sources.sofo_world import _dedupe
+    df = pd.DataFrame(dict(ticker=["ACME"] * 3, headline=["Acme declares quarterly dividend"] * 3, cluster_id=[None] * 3,
+                           published_at=["2026-08-01T12:00:00Z", "2026-08-01T15:00:00Z", "2026-11-01T12:00:00Z"]))
+    assert len(_dedupe(df)) == 2          # the syndicated copy on Aug 1 counts once; November is a new story
+
+
+def test_scan_targets_the_session_after_the_last_close():
+    from stockgpt.sessions import add_pending_session, next_session
+    assert str(next_session("2026-11-25").date()) == "2026-11-27"      # Thanksgiving is skipped
+    assert str(next_session("2026-04-02").date()) == "2026-04-06"      # Good Friday and the weekend
+    px = pd.DataFrame(dict(date=pd.to_datetime(["2026-11-18", "2026-11-19", "2026-11-19"]), ticker=["A", "A", "B"], close=[1.0, 2.0, 3.0]))
+    pre = pd.DataFrame(dict(date=pd.to_datetime(["2026-11-20"]), ticker=["B"], premarket=[3.3]))
+    out = add_pending_session(px, pre)
+    new = out[out["date"] == "2026-11-20"].set_index("ticker")
+    assert list(new.index) == ["A", "B"] and new["close"].isna().all() and new.loc["B", "premarket"] == 3.3
+    assert len(add_pending_session(out, pre)) == len(out)               # never added twice

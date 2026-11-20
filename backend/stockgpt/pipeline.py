@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from datetime import datetime, timezone
 
@@ -115,7 +116,8 @@ def data_used(tables: dict, scan_date) -> list[dict]:
         h = pd.read_parquet(hp, columns=["ticker", "published_at"])
         h = h[~h["ticker"].str.startswith("_")]
         row("News headlines", "Sofo World articles" if src.get("news") == "Sofo World" else "Yahoo Finance headlines, read directly until Sofo World supplies them", h["published_at"].max().tz_convert(ET).tz_localize(None), "context",
-            f"{h['ticker'].nunique():,} stocks; shown and summarised on each stock page, not used to rank (the model has no headline history to learn from yet)")
+            f"{h['ticker'].nunique():,} stocks; " + ("the same articles, shown and summarised on each stock page" if src.get("news") == "Sofo World"
+                                                    else "shown and summarised on each stock page, not used to rank (the model has no headline history to learn from yet)"))
     if fp.exists():
         fl = pd.read_parquet(fp, columns=["ticker", "date"])
         last = fl["date"].max()
@@ -247,6 +249,13 @@ def run(scan_only: bool = False, reuse: bool = False):
     log("loading data")
     tables, source = load_all()
     log(f"source={source}  tickers={len(tables['tickers'])}  news={len(tables['news'])}")
+    if source == "user" and os.getenv("STOCKGPT_PENDING_SESSION", "1") == "1":
+        # Scan the session that has not traded yet: it sees every article published since the last close.
+        from .sessions import add_pending_session
+        from .sources.snapshots import load as load_snap
+        last = tables["prices"]["date"].max()
+        tables["prices"] = add_pending_session(tables["prices"], load_snap("premarket"))
+        log(f"last close {pd.Timestamp(last).date()}; scanning for {pd.Timestamp(tables['prices']['date'].max()).date()}")
     panel = build_panel(tables)
     feats = feature_columns(panel)
     log(f"panel {panel.shape}  features={len(feats)}")
