@@ -169,7 +169,7 @@ export default function Today() {
 
       {data.data_used && <DataUsedTable rows={data.data_used} scan={data.scan_date} />}
 
-      {open && <IdeaPanel idea={open} track={track.get(open.ticker)} equity={data.equity} live={liveRow.get(open.ticker)} onClose={() => setOpen(null)} />}
+      {open && <IdeaPanel winRate={bt?.strategies?.stock_daytrade?.win_rate} tested={bt?.strategies?.stock_daytrade?.trades} idea={open} track={track.get(open.ticker)} equity={data.equity} live={liveRow.get(open.ticker)} onClose={() => setOpen(null)} />}
     </div>
   );
 }
@@ -274,7 +274,7 @@ function IdeaList({ title, tone: t, ideas, track, live, onOpen, openTicker }: {
   );
 }
 
-function IdeaPanel({ idea: i, track, equity, live, onClose }: { idea: Idea; track?: AccuracyRow; equity: number; live?: LiveRow; onClose: () => void }) {
+function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested }: { idea: Idea; track?: AccuracyRow; equity: number; live?: LiveRow; onClose: () => void; winRate?: number; tested?: number }) {
   const { data: prof } = useApi<TickerProfile>(`ticker/${i.ticker}`);
   const buy = i.action === "BUY";
   // the option quote is asked for only when the panel is open (one request, refreshed each minute)
@@ -302,6 +302,10 @@ function IdeaPanel({ idea: i, track, equity, live, onClose }: { idea: Idea; trac
           </div>
           <button onClick={onClose} className="rounded-lg border border-ink-600 p-1.5 text-ink-300 hover:text-ink-100" aria-label="Close"><X className="h-4 w-4" /></button>
         </div>
+
+        <Block title="In plain words">
+          <PlainWords idea={i} track={track} winRate={winRate} tested={tested} />
+        </Block>
 
         <Block title="What to do">
           <p className="text-[15px] text-ink-100">{i.plan}</p>
@@ -401,6 +405,35 @@ function IdeaPanel({ idea: i, track, equity, live, onClose }: { idea: Idea; trac
       </aside>
     </div>
   );
+}
+
+function PlainWords({ idea: i, track, winRate, tested }: { idea: Idea; track?: AccuracyRow; winRate?: number; tested?: number }) {
+  const buy = i.action === "BUY";
+  const m = i.exp_move_pct, px = i.ref_price, cash = i.notional;
+  const lo = px * (1 - m), hi = px * (1 + m);
+  const own = track && track.strong_n >= 30 && track.strong_accuracy != null ? track.strong_accuracy : null;
+  const p = own ?? winRate ?? null;
+  const level = p == null ? "Unknown" : p >= 0.55 ? "High" : p >= 0.52 ? "Medium" : "Low";
+  const rows: [string, React.ReactNode][] = [
+    ["Action", <>{buy ? "Buy" : "Short"} about {i.shares.toLocaleString()} shares ({usd(cash, 0)}) when the market opens, and close the position before it shuts the same day.
+      {buy ? " You make money if the price ends the day higher than it started." : " You make money if the price ends the day lower than it started."}</>],
+    ["Expected range", <>On a normal day this stock moves about {pct(m, 1, false)} between the open and the close. From {usd(px, 2)}, that is roughly {usd(lo, 2)} to {usd(hi, 2)} by the close.
+      {i.earnings_today && " It reports earnings, so today's move can be several times larger."}</>],
+    ["Risk", <>A normal move against you costs about {usd(cash * m, 0)} on this position. A bad day, three times the normal move, costs about {usd(cash * m * 3, 0)}.
+      {buy ? "" : " A short can lose more than a buy if the stock jumps."} There is no stop in the tested plan: the position is held to the close.</>],
+    ["Confidence", <><span className={clsx("font-semibold", level === "High" ? "text-up" : level === "Medium" ? "text-ink-100" : "text-amber")}>{level}.</span>{" "}
+      {winRate != null && <>In testing, calls like this were right {pct(winRate, 1, false)} of the time{tested ? ` over ${tested.toLocaleString()} trades` : ""}{winRate < 0.52 ? ", about the same as a coin flip" : ""}. </>}
+      {own != null && <>On this stock, the strongest calls were right {pct(own, 0, false)} of the time ({track!.strong_n} calls). </>}
+      Treat this as a research idea, not a sure thing.</>],
+  ];
+  return (
+    <dl className="space-y-2.5">
+      {rows.map(([k, v]) => (
+        <div key={k} className="grid grid-cols-[108px_1fr] gap-3">
+          <dt className="text-[12.5px] font-medium text-ink-400">{k}</dt>
+          <dd className="text-[14px] leading-relaxed text-ink-100">{v}</dd>
+        </div>))}
+    </dl>);
 }
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
