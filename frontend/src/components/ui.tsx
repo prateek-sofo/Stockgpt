@@ -2,18 +2,34 @@ import clsx from "clsx";
 import type { ReactNode } from "react";
 import { pct, tone } from "../lib/format";
 
+/** A section of a page. By default it is a heading over a hairline with its content below, no box:
+ *  on a white page the rule is enough. `pad={false}` is for a table or list that is one object and
+ *  scrolls on its own; that one gets a surface. */
 export function Card({ children, className, title, right, pad = true }: {
   children: ReactNode; className?: string; title?: ReactNode; right?: ReactNode; pad?: boolean;
 }) {
+  if (!pad) {
+    return (
+      <section className={clsx("card fade-in overflow-hidden", className)}>
+        {(title || right) && (
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 px-5 py-2.5">
+            <h3 className="t-head">{title}</h3>
+            {right}
+          </header>
+        )}
+        {children}
+      </section>
+    );
+  }
   return (
-    <section className={clsx("card fade-in", className)}>
+    <section className={clsx("fade-in", className)}>
       {(title || right) && (
-        <header className="flex items-center justify-between gap-3 px-5 pt-4 pb-2">
-          <h3 className="text-[15px] font-semibold tracking-tight text-ink-100">{title}</h3>
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 pb-2">
+          <h3 className="t-head">{title}</h3>
           {right}
         </header>
       )}
-      <div className={clsx(pad && "px-5 pb-5", !title && !right && pad && "pt-5")}>{children}</div>
+      {children}
     </section>
   );
 }
@@ -22,22 +38,22 @@ export function Stat({ label, value, sub, valueClass, hint }: {
   label: string; value: ReactNode; sub?: ReactNode; valueClass?: string; hint?: string;
 }) {
   return (
-    <div className="card px-4 py-3.5 fade-in" title={hint}>
-      <div className="label">{label}</div>
-      <div className={clsx("num mt-1.5 text-[23px] font-semibold leading-none tracking-tight text-ink-100", valueClass)}>{value}</div>
-      {sub && <div className="mt-1.5 text-[12.5px] leading-snug text-ink-400">{sub}</div>}
+    <div className="border-t border-ink-700 pt-3 fade-in" title={hint}>
+      <div className="t-label">{label}</div>
+      <div className={clsx("mt-1.5 font-[family-name:var(--font-display)] text-[22px] font-semibold leading-none tracking-tight text-ink-100 [font-variant-numeric:tabular-nums]", valueClass)}>{value}</div>
+      {sub && <div className="t-small mt-1.5">{sub}</div>}
     </div>
   );
 }
 
 export function Pill({ children, color = "ink", className }: { children: ReactNode; color?: "up" | "down" | "amber" | "accent" | "sky" | "ink"; className?: string }) {
   const c = {
-    up: "bg-up/12 text-up ring-1 ring-up/25",
-    down: "bg-down/12 text-down ring-1 ring-down/25",
-    amber: "bg-amber/12 text-amber ring-1 ring-amber/25",
-    accent: "bg-accent/14 text-accent ring-1 ring-accent/30",
-    sky: "bg-sky/12 text-sky ring-1 ring-sky/25",
-    ink: "bg-ink-800 text-ink-300 ring-1 ring-ink-600",
+    up: "bg-up/10 text-up",
+    down: "bg-down/10 text-down",
+    amber: "bg-ink-850 text-ink-200 before:mr-0.5 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:bg-amber before:content-['']",
+    accent: "bg-wash text-accent",
+    sky: "bg-sky/10 text-sky",
+    ink: "bg-ink-850 text-ink-300",
   }[color];
   return <span className={clsx("chip", c, className)}>{children}</span>;
 }
@@ -118,12 +134,14 @@ export function ErrorBox({ error }: { error: string }) {
   );
 }
 
+/** The first thing to read on a screen: one sentence in the display size, and under it the
+ *  quieter line that qualifies it. */
 export function PageHeader({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-[26px] font-semibold tracking-tight text-ink-100">{title}</h1>
-        {sub && <p className="mt-1 max-w-[80ch] text-[14px] text-ink-400">{sub}</p>}
+      <div className="min-w-0">
+        <h1 className="t-display">{title}</h1>
+        {sub && <div className="t-body mt-1.5 max-w-[78ch] text-ink-400">{sub}</div>}
       </div>
       {right}
     </div>
@@ -132,11 +150,11 @@ export function PageHeader({ title, sub, right }: { title: ReactNode; sub?: Reac
 
 export function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { v: T; label: ReactNode }[] }) {
   return (
-    <div className="inline-flex rounded-lg border border-ink-600 bg-ink-950 p-0.5">
+    <div className="inline-flex rounded-[6px] border border-ink-700 bg-ink-900 p-0.5">
       {items.map((it) => (
         <button key={it.v} onClick={() => onChange(it.v)}
-          className={clsx("rounded-md px-3 py-1.5 text-[13px] font-medium transition",
-            value === it.v ? "bg-ink-900 text-ink-100 shadow-sm ring-1 ring-ink-600" : "text-ink-400 hover:text-ink-100")}>
+          className={clsx("rounded-[4px] px-2.5 py-1 text-[12.5px] font-medium transition-colors",
+            value === it.v ? "bg-ink-850 text-ink-100" : "text-ink-400 hover:text-ink-100")}>
           {it.label}
         </button>
       ))}
@@ -145,7 +163,7 @@ export function Tabs<T extends string>({ value, onChange, items }: { value: T; o
 }
 
 export const chartTooltip = {
-  contentStyle: { background: "var(--color-ink-900)", border: "1px solid var(--color-ink-600)", borderRadius: 12, fontSize: 12, boxShadow: "0 10px 30px rgba(0,0,0,.5)" },
+  contentStyle: { background: "var(--color-ink-900)", border: "1px solid var(--color-ink-600)", borderRadius: 6, fontSize: 12, boxShadow: "0 14px 34px -22px rgba(14,17,22,.35)" },
   labelStyle: { color: "var(--color-ink-300)", marginBottom: 4 },
   itemStyle: { padding: 0 },
   cursor: { stroke: "var(--color-ink-500)", strokeDasharray: "3 3" },

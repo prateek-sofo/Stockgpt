@@ -1,9 +1,9 @@
 import clsx from "clsx";
-import { ArrowDownRight, ArrowUpRight, CalendarClock, Check, ChevronRight, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CalendarClock, Check, ChevronRight, Sparkles, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { chartTooltip, ErrorBox, Loading, Pill, SentDot } from "../components/ui";
+import { chartTooltip, ErrorBox, Loading, Pill, SentDot, Stat } from "../components/ui";
 import { STATIC, useApi, useLive } from "../lib/api";
 import { compact, num, pct, tone, usd } from "../lib/format";
 import type { AccuracyData, AccuracyRow, Backtest, Brief, DataUsed, Idea, LiveBoard, LiveOption, Market, TickerProfile } from "../lib/types";
@@ -44,95 +44,92 @@ export default function Today() {
   const liveRow = new Map((live?.rows ?? []).map((r) => [r.ticker, r]));
   return (
     <div>
-      {/* ---- the answer first ---- */}
-      <section className="card p-6">
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
-          <div className="min-w-[280px] flex-1">
-            <div className="label">{day.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · before the open</div>
-            <h1 className="mt-2 text-[28px] font-semibold leading-tight tracking-tight text-ink-100">
-              {longs.length} to buy, {shorts.length} to short
-            </h1>
-            <p className="mt-2 max-w-[68ch] text-[15px] leading-relaxed text-ink-300">
-              The model ranked {data.universe_size} tradable stocks by how each should do against the market from today's open to the close.
-              These are the strongest on each side. {optionIdeas.length ? `${optionIdeas.length} also clear option costs.` : "None clear option costs today, so shares only."}
-            </p>
-            {priceRow && priceRow.status !== "ok" && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg bg-down/10 px-3 py-2 text-[14px] text-ink-200">
-                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-down" />
-                <span><b className="font-semibold text-ink-100">Price data behind this scan is incomplete.</b> {priceRow.note}. Treat these ideas with extra caution.</span>
-              </p>)}
-            {newsRow && (
-              <p className={clsx("mt-3 inline-flex items-start gap-2 rounded-lg px-3 py-2 text-[14px]", newsRow.status === "ok" ? "bg-up/10 text-ink-200" : "bg-amber/10 text-ink-200")}>
-                <span className={clsx("mt-1.5 h-2 w-2 shrink-0 rounded-full", newsRow.status === "ok" ? "bg-up" : "bg-amber")} />
-                {newsRow.status === "ok" ? <span>News used: {newsRow.note}.</span>
-                  : <span><b className="font-semibold text-ink-100">No news was used for these ideas.</b> Sofo World news is not connected, so the ranking rests on prices, filings and earnings through {fmtDay(priceRow?.through)}.</span>}
-              </p>)}
-          </div>
-          {rel && (
-            <div className="w-full max-w-[380px] rounded-xl border border-ink-700 bg-ink-850 p-4">
-              <div className="flex items-center gap-2"><span className="label">How much to trust this</span><Pill color={rel.color}>{rel.level}</Pill></div>
-              <p className="mt-2 text-[13.5px] leading-relaxed text-ink-300">{rel.text}</p>
-              <Link to="/performance" className="mt-2 inline-flex items-center gap-1 text-[13.5px] font-medium text-accent hover:underline">See the evidence <ChevronRight className="h-4 w-4" /></Link>
-            </div>
-          )}
+      {/* ---- one sentence to read first ---- */}
+      <header className="mb-5">
+        <div className="t-small">{day.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · scan made before the open</div>
+        <h1 className="t-display mt-1.5">
+          {longs.length} to buy, {shorts.length} to short.{" "}
+          <span className="text-ink-400">
+            {settled.length ? `${right} of ${settled.length} were right.` : live ? `${live.on_track} of ${live.scored} on track so far.` : "Results come after the close."}
+          </span>
+        </h1>
+        <p className="t-body mt-2 max-w-[74ch]">
+          The model ranked {data.universe_size} tradable stocks by how each should do against the market from the open to the close. These are the strongest on each side.{" "}
+          {optionIdeas.length ? `${optionIdeas.length} also clear option costs.` : "None clear option costs, so shares only."}
+        </p>
+      </header>
+
+      {/* ---- what the model says about itself: the only blue on the page ---- */}
+      <section className="read px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-accent" />
+          <span className="t-label !text-accent">The model's read</span>
+          {rel && <Pill color={rel.color}>Trust: {rel.level}</Pill>}
         </div>
-        <div className="mt-5 grid grid-cols-2 gap-x-8 gap-y-3 border-t border-ink-700 pt-4 md:grid-cols-4">
-          <Fact label="Market before the open" value={hasPremarket ? <span className={tone(data.market.premarket_gap)}>{pct(data.market.premarket_gap, 2)}</span> : "–"}
-            note={hasPremarket ? "average premarket gap" : "premarket prices not loaded for this scan"} />
-          <Fact label="Size per position" value={usd(data.book?.per_position)} note={`on ${usd(data.equity)}, 1× long and 1× short`} />
-          <Fact label="Political risk in the news" value={w?.politics_risk == null ? "–" : w.politics_risk > 1.5 ? "Elevated" : w.politics_risk > 0.5 ? "Watch" : "Calm"}
-            note={w?.vix == null ? "" : `VIX ${num(w.vix, 1)} · 10y ${w.dgs10_chg5 == null ? "–" : `${w.dgs10_chg5 > 0 ? "+" : ""}${(w.dgs10_chg5 * 100).toFixed(0)} bp`} this week`} />
-          <Fact label={settled.length ? "How these ideas did" : "Result"} value={settled.length ? `${right} of ${settled.length} right` : "Pending"}
-            note={settled.length ? "vs the market, this session" : live ? `${live.on_track} of ${live.scored} on track so far` : "fills in after the close"} />
-        </div>
+        <p className="mt-2 max-w-[86ch] text-[14.5px] font-medium leading-snug text-ink-100">{rel ? rel.text : "Loading the backtest behind this ranking."}</p>
+        <ul className="mt-3 space-y-1.5">
+          {priceRow && priceRow.status !== "ok" && (
+            <li className="flex gap-2.5 text-[13.5px] text-ink-200"><span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-down" />
+              <span><b className="font-semibold text-ink-100">The price data behind this scan was incomplete.</b> {priceRow.note}.</span></li>)}
+          {newsRow && (
+            <li className="flex gap-2.5 text-[13.5px] text-ink-200"><span className={clsx("mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full", newsRow.status === "ok" ? "bg-up" : "bg-amber")} />
+              {newsRow.status === "ok" ? <span>News used: {newsRow.note}.</span>
+                : <span><b className="font-semibold text-ink-100">No news was used.</b> Sofo World news is not connected, so the ranking rests on prices, filings and earnings through {fmtDay(priceRow?.through)}.</span>}</li>)}
+          {data.book?.beta_long != null && data.book?.beta_short != null && (() => {
+            const gap = data.book.beta_long - data.book.beta_short, tilted = Math.abs(gap) > 0.4;
+            return (
+              <li className="flex gap-2.5 text-[13.5px] text-ink-200"><span className={clsx("mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full", tilted ? "bg-amber" : "bg-up")} />
+                <span><b className="font-semibold text-ink-100">{tilted ? (gap > 0 ? "This book leans on the market rising." : "This book leans on the market falling.") : "The two sides are balanced against the market."}</b>{" "}
+                  The buys move about {num(data.book.beta_long, 1)}× as much as the market and the shorts {num(data.book.beta_short, 1)}×.
+                  {tilted ? (gap > 0 ? " If the market falls, most calls will look wrong whatever the stocks' own news." : " If the market rises, most calls will look wrong whatever the stocks' own news.") : ""}</span></li>);
+          })()}
+        </ul>
+        <Link to="/performance" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">See the evidence <ChevronRight className="h-3.5 w-3.5" /></Link>
       </section>
-      {mkt && (
-        <Link to="/market" className="card mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 transition hover:border-accent/50">
-          <span className="label">Market backdrop</span>
-          <Pill color={mkt.macro.verdict.startsWith("More supports") ? "up" : mkt.macro.verdict.startsWith("More risks") ? "down" : "amber"}>{mkt.macro.verdict}</Pill>
-          <span className="text-[14px] text-ink-200">{mkt.macro.bull.length} things helping stocks, {mkt.macro.risks.length} risks.</span>
-          {mkt.macro.risks[0] && <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-400">Top risk: {mkt.macro.risks[0].text}</span>}
-          {mkt.filings && <span className="text-[13.5px] text-ink-400">{mkt.filings.important.length} notable SEC filings on {fmtDay(mkt.filings.date)}</span>}
-          <ChevronRight className="ml-auto h-4 w-4 text-ink-400" />
-        </Link>)}
 
+      <div className="mt-6 grid grid-cols-2 gap-x-8 gap-y-5 md:grid-cols-4">
+        <Stat label="Market before the open" value={hasPremarket ? <span className={tone(data.market.premarket_gap)}>{pct(data.market.premarket_gap, 2)}</span> : "–"}
+          sub={hasPremarket ? "average premarket gap" : "premarket prices not loaded for this scan"} />
+        <Stat label="Size per position" value={usd(data.book?.per_position)} sub={`on ${usd(data.equity)}, 1× long and 1× short`} />
+        <Stat label="Fear gauge (VIX)" value={w?.vix == null ? "–" : num(w.vix, 1)}
+          sub={w?.politics_risk == null ? "" : `political risk in the news: ${w.politics_risk > 1.5 ? "elevated" : w.politics_risk > 0.5 ? "watch" : "calm"}`} />
+        <Stat label={settled.length ? "How these ideas did" : "Result"} value={settled.length ? `${right} of ${settled.length} right` : "Pending"}
+          valueClass={settled.length ? (right * 2 > settled.length ? "text-up" : "text-down") : undefined}
+          sub={settled.length ? <Link to="/record" className="hover:text-accent">against the market · see the day</Link> : live ? `${live.on_track} of ${live.scored} on track so far` : "fills in after the close"} />
+      </div>
 
-      {live && (
-        <section className="card mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3.5">
-          <span className="flex items-center gap-2"><span className={clsx("h-2 w-2 rounded-full", live.state === "open" && !STATIC ? "animate-pulse bg-up" : "bg-ink-400")} />
-            <span className="label">{STATIC ? "Prices when this copy was made" : live.state === "open" ? "Live" : live.state === "pre" ? "Before the open" : "After the close"}</span></span>
-          <span className="text-[15px] text-ink-100"><b className={clsx("num", live.on_track * 2 >= live.scored ? "text-up" : "text-down")}>{live.on_track} of {live.scored}</b> calls on track</span>
-          <span className="text-[14px] text-ink-300">book <b className={clsx("num", tone(live.book))}>{pct(live.book, 2)}</b> since the open</span>
-          <span className="text-[14px] text-ink-300">S&P 500 <b className={clsx("num", tone(live.market.chg_open))}>{pct(live.market.chg_open, 2)}</b></span>
-          <span className="ml-auto text-[12.5px] text-ink-400">as of {new Date(live.as_of).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}
-            {!STATIC && " · refreshes every 30 s"} · Yahoo quotes, can lag up to 15 min</span>
-          <Link to="/record" className="basis-full text-[13px] font-medium text-accent hover:underline">A buy is on track when the stock is beating the S&P 500 since the open; a short when it is lagging it. Final results are marked after the close on the Track record page.</Link>
-        </section>)}
-
-      {data.book?.beta_long != null && data.book?.beta_short != null && (() => {
-        const gap = data.book.beta_long - data.book.beta_short, tilted = Math.abs(gap) > 0.4;
-        return (
-          <p className={clsx("mt-4 rounded-xl border px-5 py-3 text-[14px] leading-relaxed", tilted ? "border-amber/40 bg-amber/10 text-ink-200" : "border-ink-700 text-ink-300")}>
-            <b className="font-semibold text-ink-100">Market exposure of this book: {tilted ? (gap > 0 ? "leans on the market rising" : "leans on the market falling") : "roughly balanced"}.</b>{" "}
-            The buys move about {num(data.book.beta_long, 1)}× as much as the market and the shorts {num(data.book.beta_short, 1)}×.
-            {tilted ? (gap > 0 ? " If the market falls, the buys should fall more than the shorts, so most calls would look wrong whatever the stocks' own news."
-              : " If the market rises, the shorts should rise more than the buys, so most calls would look wrong whatever the stocks' own news.")
-              : " A market move in either direction should affect both sides about equally."}
-          </p>); })()}
-
-      {data.revised_after_open && (() => { const r = data.revised_after_open!; return (
-        <details className="card mt-4 px-5 py-3.5">
-          <summary className="cursor-pointer text-[14px] font-semibold text-ink-100">What the scan says when rerun on complete data (after the open, not part of the record)</summary>
-          <p className="mt-2 text-[13.5px] leading-relaxed text-ink-300">{r.reason}</p>
-          <p className="mt-2 text-[13.5px] text-ink-300"><b className="text-up">Buy:</b> {r.longs.map((t) => <Link key={t} to={`/t/${t}`} className="mr-2 font-semibold hover:text-accent">{t}</Link>)}</p>
-          <p className="mt-1 text-[13.5px] text-ink-300"><b className="text-down">Short:</b> {r.shorts.map((t) => <Link key={t} to={`/t/${t}`} className="mr-2 font-semibold hover:text-accent">{t}</Link>)}</p>
-          <p className="mt-2 text-[13px] text-ink-400">Market sensitivity: buys {num(r.beta_long, 1)}×, shorts {num(r.beta_short, 1)}×.
-            {r.live_check && ` When checked at ${new Date(r.live_check.time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}: ${r.live_check.on_track} of ${r.live_check.scored} on track (buys ${pct(r.live_check.long_move, 1)}, shorts ${pct(r.live_check.short_move, 1)}, S&P ${pct(r.live_check.spy, 1)}).`}
-            {" "}These were chosen after the market opened, so they prove nothing about skill.</p>
-        </details>); })()}
+      <div className="mt-6 divide-y divide-ink-700 border-y border-ink-700">
+        {live && (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 py-2.5">
+            <span className="flex items-center gap-2"><span className={clsx("h-1.5 w-1.5 rounded-full", live.state === "open" && !STATIC ? "animate-pulse bg-up" : "bg-ink-400")} />
+              <span className="t-head">{STATIC ? "Prices when this copy was made" : live.state === "open" ? "Live" : live.state === "pre" ? "Before the open" : "After the close"}</span></span>
+            <span className="text-[13.5px] text-ink-200"><b className={clsx("num font-semibold", live.on_track * 2 >= live.scored ? "text-up" : "text-down")}>{live.on_track} of {live.scored}</b> on track</span>
+            <span className="text-[13.5px] text-ink-200">book <b className={clsx("num font-semibold", tone(live.book))}>{pct(live.book, 2)}</b></span>
+            <span className="text-[13.5px] text-ink-200">S&P 500 <b className={clsx("num font-semibold", tone(live.market.chg_open))}>{pct(live.market.chg_open, 2)}</b> since the open</span>
+            <span className="t-small ml-auto">{new Date(live.as_of).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}{!STATIC && " · refreshes every 30 s"} · quotes can lag 15 min</span>
+          </div>)}
+        {mkt && (
+          <Link to="/market" className="row-btn flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5">
+            <span className="t-head">Market backdrop</span>
+            <Pill color={mkt.macro.verdict.startsWith("More supports") ? "up" : mkt.macro.verdict.startsWith("More risks") ? "down" : "amber"}>{mkt.macro.verdict}</Pill>
+            <span className="min-w-0 flex-1 truncate text-[13.5px] text-ink-400">{mkt.macro.risks[0] ? `Top risk: ${mkt.macro.risks[0].text}` : `${mkt.macro.bull.length} supports, ${mkt.macro.risks.length} risks`}</span>
+            {mkt.filings && <span className="t-small">{mkt.filings.important.length} notable filings on {fmtDay(mkt.filings.date)}</span>}
+            <ChevronRight className="h-4 w-4 text-ink-400" />
+          </Link>)}
+        {data.revised_after_open && (() => { const r = data.revised_after_open!; return (
+          <details className="py-2.5">
+            <summary className="t-head">Rerun on complete data after the open <span className="t-small font-normal">not part of the record</span></summary>
+            <p className="t-body mt-2 max-w-[86ch]">{r.reason}</p>
+            <p className="mt-2 text-[13.5px] text-ink-200"><b className="font-semibold text-up">Buy</b> {r.longs.map((t) => <Link key={t} to={`/t/${t}`} className="ml-2 font-medium text-ink-100 hover:text-accent">{t}</Link>)}</p>
+            <p className="mt-1 text-[13.5px] text-ink-200"><b className="font-semibold text-down">Short</b> {r.shorts.map((t) => <Link key={t} to={`/t/${t}`} className="ml-2 font-medium text-ink-100 hover:text-accent">{t}</Link>)}</p>
+            <p className="t-small mt-2">Market sensitivity: buys {num(r.beta_long, 1)}×, shorts {num(r.beta_short, 1)}×.
+              {r.live_check && ` Checked at ${new Date(r.live_check.time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}: ${r.live_check.on_track} of ${r.live_check.scored} on track.`}
+              {" "}Chosen after the market opened, so it proves nothing about skill.</p>
+          </details>); })()}
+      </div>
 
       {/* ---- the ideas ---- */}
-      <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <div className="mt-8 grid grid-cols-1 gap-x-10 gap-y-8 xl:grid-cols-2">
         <IdeaList title="Buy" tone="up" ideas={longs} track={track} live={liveRow} onOpen={setOpen} openTicker={open?.ticker} />
         <IdeaList title="Short" tone="down" ideas={shorts} track={track} live={liveRow} onOpen={setOpen} openTicker={open?.ticker} />
       </div>
@@ -223,30 +220,30 @@ function IdeaList({ title, tone: t, ideas, track, live, onOpen, openTicker }: {
 }) {
   const Icon = t === "up" ? ArrowUpRight : ArrowDownRight;
   return (
-    <section className="card overflow-hidden">
-      <header className="flex items-center gap-2 border-b border-ink-700 px-5 py-3">
-        <span className={clsx("grid h-7 w-7 place-items-center rounded-lg", t === "up" ? "bg-up/15 text-up" : "bg-down/15 text-down")}><Icon className="h-4 w-4" /></span>
-        <h2 className="text-[16px] font-semibold text-ink-100">{title}</h2>
+    <section>
+      <header className="flex items-center gap-2 border-b border-ink-600 pb-2.5">
+        <span className={clsx("grid h-5 w-5 place-items-center rounded-[4px]", t === "up" ? "bg-up/10 text-up" : "bg-down/10 text-down")}><Icon className="h-3.5 w-3.5" /></span>
+        <h2 className="t-head">{title}</h2>
         <span className="text-[13px] text-ink-400">{t === "up" ? "expected to beat the market today" : "expected to lag the market today"}</span>
       </header>
-      {ideas.length === 0 && <p className="px-5 py-6 text-[14px] text-ink-400">No ideas on this side today.</p>}
+      {ideas.length === 0 && <p className="py-6 text-[13.5px] text-ink-400">No ideas on this side today.</p>}
       <ol>
         {ideas.map((i, k) => {
           const tr = track.get(i.ticker);
           const main = i.why.find((x) => x.helps) ?? i.why[0];
           return (
             <li key={i.ticker} className="border-b border-ink-700 last:border-0">
-              <button onClick={() => onOpen(i)} className={clsx("row-btn grid grid-cols-[22px_1fr_auto] items-center gap-3 px-5 py-3", openTicker === i.ticker && "bg-ink-800")}>
+              <button onClick={() => onOpen(i)} className={clsx("row-btn grid grid-cols-[22px_1fr_auto] items-center gap-3 px-1.5 py-2.5", openTicker === i.ticker && "bg-ink-800")}>
                 <span className="num text-[13px] text-ink-500">{k + 1}</span>
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-[16px] font-semibold text-ink-100">{i.ticker}</span>
+                    <span className="text-[14px] font-semibold text-ink-100">{i.ticker}</span>
                     <span className="truncate text-[13px] text-ink-400">{i.name}</span>
                     <Pill color={i.strength === "Strong" ? t : i.strength === "Solid" ? "accent" : "ink"}>{i.strength}</Pill>
                     {i.earnings_today && <Pill color="amber"><CalendarClock className="h-3 w-3" />earnings</Pill>}
                     {i.option?.worth_it && <Pill color="sky">option ok</Pill>}
                   </span>
-                  <span className="mt-1 block truncate text-[13.5px] text-ink-300">
+                  <span className="mt-0.5 block truncate text-[12.5px] text-ink-400">
                     {main ? main.label : "Model ranking"}
                     {tr?.strong_accuracy != null && <span className="text-ink-400"> · right {pct(tr.strong_accuracy, 0, false)} of {tr.strong_n} past strong calls</span>}
                   </span>

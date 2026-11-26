@@ -40,7 +40,7 @@ export default function Performance() {
   const trades = data.trades.filter((t) => t.strategy === k).slice(-60).reverse();
   return (
     <div>
-      <PageHeader title="Performance"
+      <PageHeader title="Backtest"
         sub={`What each way of trading the model would have earned from ${data.period.start} to ${data.period.end}, on days the model had never seen, after trading costs.`} />
 
       <section className="card overflow-hidden">

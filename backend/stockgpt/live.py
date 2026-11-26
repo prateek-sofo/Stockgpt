@@ -154,6 +154,10 @@ def board(brief: dict, with_options: bool = False, pause: float = 0.6) -> dict:
     market = brief.get("universe") or []
     q = quotes([i["ticker"] for i in ideas] + ["SPY"] + market[:0])
     spy = q.get("SPY", {})
+    # Only today's predictions can be marked against today's prices: a scan for an earlier session
+    # must not be scored on a later day's moves.
+    session = pd.Timestamp(spy["time"]).tz_convert("America/New_York").strftime("%Y-%m-%d") if spy.get("time") else None
+    current = session is not None and session == brief.get("scan_date")
     rows = []
     def opt(i):
         """The contract the scan suggested, or else the at-the-money call (buy) or put (short) for next week."""
@@ -176,12 +180,12 @@ def board(brief: dict, with_options: bool = False, pause: float = 0.6) -> dict:
     for i, o in zip(ideas, opts):
         x = q.get(i["ticker"])
         sgn = 1 if i["action"] == "BUY" else -1
-        rel = (x["chg_open"] - spy["chg_open"]) if x and x.get("chg_open") is not None and spy.get("chg_open") is not None else None
+        rel = (x["chg_open"] - spy["chg_open"]) if current and x and x.get("chg_open") is not None and spy.get("chg_open") is not None else None
         rows.append(dict(ticker=i["ticker"], action=i["action"], quote=x, rel_open=rel,
                          on_track=(rel * sgn > 0) if rel is not None else None, option=o))
     scored = [r for r in rows if r["on_track"] is not None]
-    longs = [r["quote"]["chg_open"] for r in rows if r["action"] == "BUY" and r["quote"] and r["quote"].get("chg_open") is not None]
-    shorts = [r["quote"]["chg_open"] for r in rows if r["action"] == "SHORT" and r["quote"] and r["quote"].get("chg_open") is not None]
+    longs = [r["quote"]["chg_open"] for r in rows if current and r["action"] == "BUY" and r["quote"] and r["quote"].get("chg_open") is not None]
+    shorts = [r["quote"]["chg_open"] for r in rows if current and r["action"] == "SHORT" and r["quote"] and r["quote"].get("chg_open") is not None]
     return dict(as_of=datetime.now(timezone.utc).isoformat(), scan_date=brief.get("scan_date"), state=spy.get("state"),
                 market=spy, rows=rows, on_track=sum(r["on_track"] for r in scored), scored=len(scored),
                 book=(float(np.mean(longs)) - float(np.mean(shorts))) / 2 if longs and shorts else None,
