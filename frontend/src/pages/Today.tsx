@@ -46,7 +46,8 @@ export default function Today() {
     <div>
       {/* ---- one sentence to read first ---- */}
       <header className="mb-5">
-        <div className="t-small">{day.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })} · scan made before the open</div>
+        <div className="t-small">Recommendations for <b className="font-semibold text-ink-100">{day.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</b>
+          {" "}· enter at the 9:30 am ET open, exit by the 4:00 pm ET close{data.made_at ? ` · made ${fmtWhen(data.made_at)}` : ""}</div>
         <h1 className="t-display mt-1.5">
           {longs.length} to buy, {shorts.length} to short.{" "}
           <span className="text-ink-400">
@@ -58,6 +59,7 @@ export default function Today() {
           {optionIdeas.length ? `${optionIdeas.length} also clear option costs.` : "None clear option costs, so shares only."}
         </p>
       </header>
+      {data.data_used && <Freshness rows={data.data_used} scan={data.scan_date} />}
 
       {/* ---- what the model says about itself: the only blue on the page ---- */}
       <section className="read px-5 py-4">
@@ -169,11 +171,33 @@ export default function Today() {
 
       {data.data_used && <DataUsedTable rows={data.data_used} scan={data.scan_date} />}
 
-      {open && <IdeaPanel winRate={bt?.strategies?.stock_daytrade?.win_rate} tested={bt?.strategies?.stock_daytrade?.trades} idea={open} track={track.get(open.ticker)} equity={data.equity} live={liveRow.get(open.ticker)} onClose={() => setOpen(null)} />}
+      {open && <IdeaPanel scan={data.scan_date} expiry={data.option_expiry} madeAt={data.made_at} pricesThrough={priceRow?.through} newsOk={newsRow?.status === "ok"} winRate={bt?.strategies?.stock_daytrade?.win_rate} tested={bt?.strategies?.stock_daytrade?.trades} idea={open} track={track.get(open.ticker)} equity={data.equity} live={liveRow.get(open.ticker)} onClose={() => setOpen(null)} />}
     </div>
   );
 }
 
+const fmtWhen = (t: string) => new Date(t).toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET";
+const dayGap = (a: string, b: string) => Math.round((new Date(b + "T12:00:00").getTime() - new Date(a + "T12:00:00").getTime()) / 864e5);
+const shortDay = (d: string) => new Date(d + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+// How fresh each input was when the scan ran: the last date it covers, and how many days before the session that is.
+function Freshness({ rows, scan }: { rows: DataUsed[]; scan: string }) {
+  const pick = ["Daily prices", "Company news", "SEC filings", "Earnings dates", "Company financials", "Premarket prices", "Option prices"];
+  const items = pick.map((n) => rows.find((r) => r.source === n)).filter(Boolean) as DataUsed[];
+  return (
+    <section className="mb-5 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-y border-ink-700 py-2.5" aria-label="Data freshness">
+      <span className="t-label">Data freshness</span>
+      {items.map((r) => {
+        const age = r.through ? dayGap(r.through, scan) : null;
+        const bad = r.status === "missing" || r.status === "stale" || (age != null && age > 4);
+        return (
+          <span key={r.source} className="flex items-center gap-1.5 text-[13px]" title={r.note}>
+            <span className={clsx("h-1.5 w-1.5 rounded-full", bad ? "bg-amber" : r.status === "estimated" ? "bg-ink-500" : "bg-up")} />
+            <span className="text-ink-400">{r.source}:</span>
+            <span className="text-ink-100">{r.through ? `through ${shortDay(r.through)}${age != null && age > 4 ? ` (${age} days old)` : ""}` : r.status === "estimated" ? "estimated, not recorded" : "not available"}</span>
+          </span>);
+      })}
+    </section>);
+}
 const fmtDay = (d?: string | null) => (d ? new Date(d + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "–");
 const STATUS: Record<DataUsed["status"], { c: "up" | "down" | "amber" | "ink"; t: string }> = {
   ok: { c: "up", t: "Used" }, missing: { c: "down", t: "Not used" }, stale: { c: "amber", t: "Out of date" },
@@ -274,7 +298,7 @@ function IdeaList({ title, tone: t, ideas, track, live, onOpen, openTicker }: {
   );
 }
 
-function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested }: { idea: Idea; track?: AccuracyRow; equity: number; live?: LiveRow; onClose: () => void; winRate?: number; tested?: number }) {
+function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested, scan, expiry, madeAt, pricesThrough, newsOk }: { idea: Idea; track?: AccuracyRow; equity: number; live?: LiveRow; onClose: () => void; winRate?: number; tested?: number; scan: string; expiry?: string; madeAt?: string; pricesThrough?: string | null; newsOk?: boolean }) {
   const { data: prof } = useApi<TickerProfile>(`ticker/${i.ticker}`);
   const buy = i.action === "BUY";
   // the option quote is asked for only when the panel is open (one request, refreshed each minute)
@@ -304,7 +328,7 @@ function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested }: {
         </div>
 
         <Block title="In plain words">
-          <PlainWords idea={i} track={track} winRate={winRate} tested={tested} />
+          <PlainWords idea={i} track={track} winRate={winRate} tested={tested} scan={scan} madeAt={madeAt} pricesThrough={pricesThrough} newsOk={newsOk} />
         </Block>
 
         <Block title="What to do">
@@ -341,6 +365,7 @@ function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested }: {
                   <KV k="One contract" v={opt.cost == null ? "–" : usd(opt.cost, 0)} n="100 shares" />
                   <KV k="Implied vol." v={opt.iv == null ? "–" : pct(opt.iv, 0, false)} n="a year" />
                 </dl>
+                <HoldNote scan={scan} expiry={opt.expiry} right={opt.right === "C" ? "call" : "put"} />
                 {opt.spread_pct != null && opt.spread_pct > 0.15 && (
                   <p className="mt-2 text-[13px] text-amber">Wide gap between bid and ask ({pct(opt.spread_pct, 0, false)} of the price): this contract trades thinly, and buying then selling it costs that gap.</p>)}
                 <p className="mt-2 text-[12.5px] text-ink-400">Volume today {opt.volume.toLocaleString()} · open interest {opt.open_interest.toLocaleString()} · quote {new Date(opt.time).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}.
@@ -391,6 +416,7 @@ function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested }: {
                   ? `Clears costs: expected ${pct(i.option.ev, 0)} on premium, ${pct(i.option.p_profit, 0, false)} chance of profit. Up to ${i.option.contracts} contracts at 2% risk.`
                   : `Not worth it today: expected ${pct(i.option.ev, 0)} on premium after spread and a day of time decay. Use shares.`}
               </p>
+              {i.option.worth_it && <HoldNote scan={scan} expiry={expiry} right={buy ? "call" : "put"} />}
             </>) : <p className="text-[14px] text-ink-400">No option priced for this side today. Use shares.</p>}
         </Block>
 
@@ -407,7 +433,7 @@ function IdeaPanel({ idea: i, track, equity, live, onClose, winRate, tested }: {
   );
 }
 
-function PlainWords({ idea: i, track, winRate, tested }: { idea: Idea; track?: AccuracyRow; winRate?: number; tested?: number }) {
+function PlainWords({ idea: i, track, winRate, tested, scan, madeAt, pricesThrough, newsOk }: { idea: Idea; track?: AccuracyRow; winRate?: number; tested?: number; scan: string; madeAt?: string; pricesThrough?: string | null; newsOk?: boolean }) {
   const buy = i.action === "BUY";
   const m = i.exp_move_pct, px = i.ref_price, cash = i.notional;
   const lo = px * (1 - m), hi = px * (1 + m);
@@ -415,6 +441,7 @@ function PlainWords({ idea: i, track, winRate, tested }: { idea: Idea; track?: A
   const p = own ?? winRate ?? null;
   const level = p == null ? "Unknown" : p >= 0.55 ? "High" : p >= 0.52 ? "Medium" : "Low";
   const rows: [string, React.ReactNode][] = [
+    ["For", <><b className="font-semibold">{fmtDay(scan)}</b> only. This is a one-day idea: it does not carry over to the next day.</>],
     ["Action", <>{buy ? "Buy" : "Short"} about {i.shares.toLocaleString()} shares ({usd(cash, 0)}) when the market opens, and close the position before it shuts the same day.
       {buy ? " You make money if the price ends the day higher than it started." : " You make money if the price ends the day lower than it started."}</>],
     ["Expected range", <>On a normal day this stock moves about {pct(m, 1, false)} between the open and the close. From {usd(px, 2)}, that is roughly {usd(lo, 2)} to {usd(hi, 2)} by the close.
@@ -425,6 +452,8 @@ function PlainWords({ idea: i, track, winRate, tested }: { idea: Idea; track?: A
       {winRate != null && <>In testing, calls like this were right {pct(winRate, 1, false)} of the time{tested ? ` over ${tested.toLocaleString()} trades` : ""}{winRate < 0.52 ? ", about the same as a coin flip" : ""}. </>}
       {own != null && <>On this stock, the strongest calls were right {pct(own, 0, false)} of the time ({track!.strong_n} calls). </>}
       Treat this as a research idea, not a sure thing.</>],
+    ["Data used", <>Prices through the close on {pricesThrough ? shortDay(pricesThrough) : "an unknown date"}{madeAt ? `; idea made ${fmtWhen(madeAt)}` : ""}.
+      {newsOk ? " Company news was included." : " No company news was included."} Anything that happened after that is not in this idea.</>],
   ];
   return (
     <dl className="space-y-2.5">
@@ -434,6 +463,16 @@ function PlainWords({ idea: i, track, winRate, tested }: { idea: Idea; track?: A
           <dd className="text-[14px] leading-relaxed text-ink-100">{v}</dd>
         </div>))}
     </dl>);
+}
+
+function HoldNote({ scan, expiry, right }: { scan: string; expiry?: string | null; right: string }) {
+  const left = expiry ? dayGap(scan, expiry) : null;
+  return (
+    <p className="mt-2 rounded-md bg-ink-800 px-3 py-2 text-[13.5px] leading-relaxed text-ink-100">
+      <b className="font-semibold">How long to hold:</b> buy the {right} at the open on {shortDay(scan)} and sell it by 3:55 pm ET the same day.
+      {expiry && <> The contract runs until {shortDay(expiry)}{left != null ? ` (${left} days later)` : ""}, which leaves room so it does not lose most of its value in one day, but the idea is for one day. Do not hold it overnight.</>}
+      {" "}Get out early if the option loses half of what you paid.
+    </p>);
 }
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {

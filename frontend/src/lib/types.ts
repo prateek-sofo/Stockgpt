@@ -40,7 +40,7 @@ export interface Brief {
     live_check?: { time: string; on_track: number; scored: number; long_move: number; short_move: number; spy: number | null } };
   data_used?: DataUsed[];
   world?: World; longs?: Idea[]; shorts?: Idea[]; book?: { per_position: number; positions: number; beta_long?: number | null; beta_short?: number | null; beta_neutral?: boolean };
-  scan_date: string; generated_for: string; equity: number; universe_size: number; scanned: number;
+  scan_date: string; generated_for: string; made_at?: string; option_expiry?: string; equity: number; universe_size: number; scanned: number;
   market: { premarket_gap: number; news_items: number; regime_vol: number; cal_slope: number };
   options: Ticket[]; stocks: Ticket[]; straddles: Straddle[];
   thresholds: { min_prob: number; min_ev: number }; qualified: { options: number; stocks: number };

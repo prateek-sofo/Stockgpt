@@ -288,6 +288,7 @@ def run(scan_only: bool = False, reuse: bool = False):
     log("loading data")
     tables, source = load_all()
     log(f"source={source}  tickers={len(tables['tickers'])}  news={len(tables['news'])}")
+    last_close = tables["prices"]["date"].max()        # the last session with real prices, before any pending row
     if source == "user" and os.getenv("STOCKGPT_PENDING_SESSION", "1") == "1":
         # Scan the session that has not traded yet: it sees every article published since the last close.
         from .sessions import add_pending_session
@@ -374,10 +375,11 @@ def run(scan_only: bool = False, reuse: bool = False):
             log(f"  {sc['scored']:,} stocks scored for {sc['date']} ({sc['tested']:,} with a tested record)")
         except MemoryError:
             log("  skipped: not enough memory")
+    brief["made_at"] = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")      # when this scan was produced
     _write("brief.json", brief)
     dates = panel.index.get_level_values("date").unique()
     _write("meta.json", dict(source=source, generated_at=datetime.now(timezone.utc).isoformat(),
-                             data_start=str(dates.min().date()), data_end=str(dates.max().date()),
+                             data_start=str(dates.min().date()), data_end=str(pd.Timestamp(last_close).date()),
                              tickers=int(len(tables["tickers"])), news=int(len(tables["news"])),
                              universe=brief["universe_size"], features=len(feats),
                              iv_source=panel.attrs.get("iv_source", "vendor"),
