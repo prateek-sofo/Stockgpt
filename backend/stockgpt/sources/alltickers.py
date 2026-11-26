@@ -89,16 +89,17 @@ def repair(days: int = 45) -> None:
     start = (old["date"].max() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
     tick = sorted(set(old["ticker"]))
     cache = DATA_DIR / "prices" / "yahoo_repair"
-    if cache.exists():
-        shutil.rmtree(cache)
+    if cache.exists() and not any(cache.glob(f"*_{start}.parquet")):
+        shutil.rmtree(cache)                       # batches from another day; today's are reused
     got = yahoo(tick, start, cache_dir=cache, threads=2, pause_s=2.0)
     missing = sorted(set(tick) - set(got["ticker"]))
-    if missing:                                    # second, slower pass for whatever was throttled
+    if missing and len(missing) < 0.2 * len(tick):  # second, slower pass for whatever was throttled (not for a universe of delisted names)
         print(f"  retrying {len(missing)} tickers", flush=True)
         import time
         time.sleep(60)
         more = yahoo(missing, start, batch=50, cache_dir=cache / "retry", threads=False, pause_s=3.0)
-        got = pd.concat([got, more], ignore_index=True)
+        if len(more):
+            got = pd.concat([got, more], ignore_index=True)
     got["date"] = pd.to_datetime(got["date"]).dt.normalize()
     cols = [c for c in old.columns if c in got.columns]
     df = pd.concat([old[cols], got.dropna(subset=["open", "close"])[cols]], ignore_index=True)

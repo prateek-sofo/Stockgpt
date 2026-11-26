@@ -17,12 +17,16 @@ import pandas as pd
 from ..config import DATA_DIR
 
 
-def assemble(start: str = "2019-01-01", min_price: float = 1.0, min_history: int = 120,
-             ever_dollar_volume: float = 1e6) -> dict:
-    """The model's universe: every exchange-listed operating company that trades above $1 and has
-    ever averaged $1M a day (about 4,600 stocks). Whether a stock is liquid enough to trade on a
-    given day is decided separately and point-in-time (universe.liquid_mask); the model still scores
-    and is graded on all of them."""
+CORE = dict(min_price=3.0, ever_dollar_volume=20e6)     # trained and backtested: deep, liquid history (about 2,500 stocks)
+WIDE = dict(min_price=1.0, ever_dollar_volume=1e6)      # scored every day: every listed operating company that trades (about 4,600)
+
+
+def assemble(start: str = "2019-01-01", min_price: float = CORE["min_price"], min_history: int = 120,
+             ever_dollar_volume: float = CORE["ever_dollar_volume"]) -> dict:
+    """Two universes come out of this function. The core one (the defaults) is what the model is
+    trained and walk-forward tested on. The wide one (`**WIDE`, a recent window) is what the trained
+    model scores each morning, so every listed stock that trades gets a view. Seven years of features
+    for the wide set does not fit in 16 GB of memory; a recent window does."""
     t = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
     # operating companies only: an SEC industry code, and not a blank-check shell (6770), commodity pool /
     # ETP (6221) or unit investment trust (6726)

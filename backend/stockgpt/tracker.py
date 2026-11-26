@@ -206,6 +206,7 @@ def build() -> dict:
     acc = json.loads((ARTIFACTS / "accuracy.json").read_text()) if (ARTIFACTS / "accuracy.json").exists() else {"stocks": []}
     accuracy = {r["ticker"]: r for r in acc["stocks"]}
     ideas = {i["ticker"]: i for i in brief.get("longs", []) + brief.get("shorts", [])}
+    scores = (json.loads((ARTIFACTS / "scores.json").read_text()) if (ARTIFACTS / "scores.json").exists() else {}).get("stocks", {})
     modelled = set(pd.read_parquet(DATA_DIR / "tickers.parquet")["ticker"]) if (DATA_DIR / "tickers.parquet").exists() else set()
 
     fmap, hmap = defaultdict(list), defaultdict(list)
@@ -294,6 +295,9 @@ def build() -> dict:
         model = None
         if idea:
             model = dict(action=idea["action"], strength=idea["strength"])
+        sc = scores.get(t.ticker)
+        if sc:                                     # the model's view today: where it ranks this stock among every stock it scores
+            model = {**(model or {}), "pct": sc["pct"], "lean": sc["lean"], "tested": sc["tested"], "of": len(scores)}
         if a:
             model = {**(model or {}), "accuracy": a["rel_accuracy"], "days": a["days"]}
             if idea:
@@ -320,14 +324,14 @@ def build() -> dict:
         shards[key][t.ticker] = light
         tone = lead.tone if lead is not None else ""
         rows.append([t.ticker, t.name, t.exchange, sector.get(t.ticker, ""), price, d1, m1, y1, round(dv), len([f for f in fl if f.importance >= 2]),
-                     len(hl), line, tone, (idea or {}).get("action", ""), round(a["rel_accuracy"], 4) if a else None])
+                     len(hl), line, tone, (idea or {}).get("action", ""), round(a["rel_accuracy"], 4) if a else None, sc["pct"] if sc else None])
         if has and d1 is not None and dv >= 5e6 and price >= 2:
             movers.append((d1, t.ticker, t.name, price, line))
 
     (ARTIFACTS / "light").mkdir(parents=True, exist_ok=True)
     for k, v in shards.items():
         (ARTIFACTS / "light" / f"{k}.json").write_text(json.dumps(v, separators=(",", ":")))
-    cols = ["ticker", "name", "exchange", "sector", "price", "d1", "m1", "y1", "dollar_volume", "filings", "news", "line", "tone", "action", "accuracy"]
+    cols = ["ticker", "name", "exchange", "sector", "price", "d1", "m1", "y1", "dollar_volume", "filings", "news", "line", "tone", "action", "accuracy", "score"]
     (ARTIFACTS / "all.json").write_text(json.dumps(dict(cols=cols, rows=rows, as_of=str(as_of.date())), separators=(",", ":"), allow_nan=False, default=lambda o: None).replace("NaN", "null"))
 
     liquid = [t for t, v in dvol.items() if v >= 20e6]
@@ -348,7 +352,7 @@ def build() -> dict:
         return [dict(ticker=t, name=n, chg=c, price=p, line=l) for c, t, n, p, l in x]
     market = dict(as_of=str(as_of.date()), macro=macro, filings=latest,
                   movers=dict(up=mv(movers[::-1][:8]), down=mv(movers[:8])),
-                  counts=dict(listed=len(listed), priced=int(sum(r[4] is not None for r in rows)), modelled=len(modelled),
+                  counts=dict(listed=len(listed), scored=len(scores), priced=int(sum(r[4] is not None for r in rows)), modelled=len(modelled),
                               with_filings=len(fmap), with_news=len(hmap),
                               by_exchange={k: int(v) for k, v in listed["exchange"].value_counts().items()}),
                   news_through=heads["published_at"].max().isoformat() if heads is not None and len(heads) else None,

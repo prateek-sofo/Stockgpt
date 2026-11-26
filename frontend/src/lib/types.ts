@@ -171,7 +171,7 @@ export interface Light {
   chg: { d1: number | null; w1: number | null; m1: number | null; m3: number | null; y1: number | null };
   hi52: number | null; lo52: number | null; closes: (number | null)[];
   summary: { line: string; points: { tone: Tone; text: string }[] }; modelled: boolean;
-  model: { action?: "BUY" | "SHORT"; strength?: string; accuracy?: number; days?: number } | null;
+  model: { action?: "BUY" | "SHORT"; strength?: string; accuracy?: number; days?: number; pct?: number; lean?: "up" | "down" | "neutral"; tested?: boolean; of?: number } | null;
   filings: { d: string; title: string; why: string; tone: Tone; form: string; url: string; imp: number }[];
   news: { t: string; h: string; src: string; url: string; tone: Tone }[];
 }

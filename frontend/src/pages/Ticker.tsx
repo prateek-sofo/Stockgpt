@@ -220,7 +220,9 @@ export default function Ticker() {
       <PageHeader
         title={<span className="flex flex-wrap items-center gap-3">{d.ticker}<span className="text-[15px] font-normal text-ink-400">{d.name}</span></span>}
         sub={<span className="flex flex-wrap items-center gap-2">{d.exchange}{d.sector && ` · ${d.sector}`}
-          {d.modelled ? <Pill color="accent">Model follows this stock</Pill> : <Pill>Tracked: price, filings and news only</Pill>}
+          {d.model?.pct != null
+            ? <Pill color="accent">Model rank today: {Math.round(d.model.pct * 100)} of 100{d.model.lean === "up" ? ", leans up" : d.model.lean === "down" ? ", leans down" : ""}{d.model.tested ? "" : " · no tested record"}</Pill>
+            : d.modelled ? <Pill color="accent">Model follows this stock</Pill> : <Pill>Tracked: price, filings and news only</Pill>}
           {d.model?.action && <Pill color={d.model.action === "BUY" ? "up" : "down"}>{d.model.action === "BUY" ? "Buy idea today" : "Short idea today"}</Pill>}</span>}
         right={d.price != null ? <div className="text-right"><div className="num text-[28px] font-semibold">{usd(d.price, 2)}</div>
           <div className={clsx("num text-[13px]", tone(d.chg.d1))}>{pct(d.chg.d1, 1)} on {day(d.as_of!)}</div></div> : <Pill color="amber">No current price</Pill>} />

@@ -19,7 +19,7 @@ from . import longterm
 from .accuracy import per_ticker as accuracy_per_ticker, summary as accuracy_summary
 from .backtest import (deflated_sharpe, build_signals, calibration, deciles, information_coefficient, monte_carlo,
                        monthly_returns, simulate, stats, walk_forward)
-from .config import ARTIFACT_DIR, SETTINGS
+from .config import ARTIFACT_DIR, DATA_DIR, SETTINGS
 from .data.loader import load_all
 from .features import ET, TRAITS, _assign_sessions, build_panel, feature_columns, score_news
 from .models.ticker_model import HierarchicalModel
@@ -147,6 +147,39 @@ def data_used(tables: dict, scan_date) -> list[dict]:
     rel = DATA_DIR / "sofo_relationships.parquet"
     row("Competitor links", "Sofo World competitor / customer / supplier graph" if rel.exists() else "SEC industry codes and price co-movement",
         known, "ok" if rel.exists() else "partial", "" if rel.exists() else "Sofo World graph not connected: using industry and co-movement peers")
+    return out
+
+
+def score_all(model, core: set[str], days: int = 760) -> dict:
+    """The trained model's view of every listed stock that trades, not only the ones it is tested on.
+    Builds the same features over a recent window for the wide universe, scores the session being
+    scanned, and ranks each stock among all of them."""
+    from .sessions import add_pending_session
+    from .sources.assemble import WIDE, assemble
+    from .sources.snapshots import load as load_snap
+    raw = pd.read_parquet(DATA_DIR / "prices_raw.parquet", columns=["date"])
+    start = (pd.to_datetime(raw["date"]).max() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+    del raw
+    tables = assemble(start=start, **WIDE)
+    from .data.loader import _normalise
+    tables = {name: _normalise(name, df) for name, df in tables.items()}
+    tables["prices"] = add_pending_session(tables["prices"], load_snap("premarket"))
+    panel = build_panel(tables)
+    last = panel.index.get_level_values("date").max()
+    today = panel.xs(last, level="date", drop_level=False)
+    del panel
+    from .universe import liquid_mask
+    preds = model.predict(today)
+    df = pd.DataFrame(dict(mu=preds["mu"].values, liquid=liquid_mask(today).values), index=today.index.get_level_values("ticker"))
+    df = df[df["mu"].notna()]
+    df["pct"] = df["mu"].rank(pct=True)
+    rows = {t: dict(pct=round(float(r.pct), 4), lean="up" if r.pct >= 0.8 else "down" if r.pct <= 0.2 else "neutral",
+                    liquid=bool(r.liquid), tested=t in core) for t, r in df.iterrows()}
+    out = dict(date=str(last.date()), scored=len(rows), tested=int(sum(v["tested"] for v in rows.values())),
+               liquid=int(sum(v["liquid"] for v in rows.values())), stocks=rows,
+               note="pct is where the model ranks the stock among all scored stocks for this session (1 = strongest). "
+                    "'tested' stocks have a walk-forward record; the others are scored by the same model without one.")
+    _write("scores.json", out)
     return out
 
 
@@ -331,6 +364,14 @@ def run(scan_only: bool = False, reuse: bool = False):
 
     brief = run_scan(panel, tables, model)
     brief["data_used"] = data_used(tables, brief["scan_date"])
+    if source == "user" and (DATA_DIR / "prices_raw.parquet").exists():
+        log("scoring every listed stock")
+        try:
+            sc = score_all(model, set(tables["tickers"]["ticker"]))
+            brief["scored"] = dict(all=sc["scored"], tested=sc["tested"], liquid=sc["liquid"])
+            log(f"  {sc['scored']:,} stocks scored for {sc['date']} ({sc['tested']:,} with a tested record)")
+        except MemoryError:
+            log("  skipped: not enough memory")
     _write("brief.json", brief)
     dates = panel.index.get_level_values("date").unique()
     _write("meta.json", dict(source=source, generated_at=datetime.now(timezone.utc).isoformat(),

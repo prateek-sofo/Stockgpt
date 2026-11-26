@@ -8,13 +8,15 @@ import { compact, num, pct, tone } from "../lib/format";
 import type { AllData } from "../lib/types";
 
 type R = { ticker: string; name: string; exchange: string; sector: string; price: number | null; d1: number | null; m1: number | null; y1: number | null;
-  dollar_volume: number; filings: number; news: number; line: string; tone: string; action: string; accuracy: number | null };
+  dollar_volume: number; filings: number; news: number; line: string; tone: string; action: string; accuracy: number | null; score: number | null };
 const NUMS: { k: keyof R; label: string; hint: string; fmt: (r: R) => React.ReactNode; cls?: (r: R) => string }[] = [
   { k: "price", label: "Price", hint: "last close", fmt: (r) => (r.price == null ? "–" : num(r.price, 2)) },
   { k: "d1", label: "Day", hint: "last session", fmt: (r) => pct(r.d1, 1), cls: (r) => tone(r.d1) },
   { k: "m1", label: "Month", hint: "past 21 sessions", fmt: (r) => pct(r.m1, 0), cls: (r) => tone(r.m1) },
   { k: "y1", label: "Year", hint: "past 12 months", fmt: (r) => pct(r.y1, 0), cls: (r) => tone(r.y1) },
   { k: "dollar_volume", label: "Traded / day", hint: "average dollars traded per day, past month", fmt: (r) => (r.dollar_volume ? compact(r.dollar_volume, "$") : "–") },
+  { k: "score", label: "Model rank", hint: "where the model ranks this stock today among every stock it scores: 100 is the strongest, 0 the weakest",
+    fmt: (r) => (r.score == null ? "–" : Math.round(r.score * 100)), cls: (r) => (r.score == null ? "text-ink-400" : r.score >= 0.8 ? "text-up" : r.score <= 0.2 ? "text-down" : "") },
   { k: "filings", label: "Filings", hint: "notable SEC filings in the past 45 days", fmt: (r) => r.filings || "–" },
   { k: "news", label: "News", hint: "news stories in the past 10 days", fmt: (r) => r.news || "–" },
 ];
@@ -30,7 +32,7 @@ export default function AllTickers() {
   const rows = useMemo(() => {
     const ql = q.trim().toLowerCase();
     return all
-      .filter((r) => (ex === "All" || r.exchange === ex) && (only === "all" || (only === "active" ? r.filings + r.news > 0 : r.accuracy != null))
+      .filter((r) => (ex === "All" || r.exchange === ex) && (only === "all" || (only === "active" ? r.filings + r.news > 0 : r.score != null))
         && (!ql || r.ticker.toLowerCase().startsWith(ql) || r.name.toLowerCase().includes(ql)))
       .sort((a, b) => (((a[sort.k] as number) ?? -1e18) > ((b[sort.k] as number) ?? -1e18) ? sort.d : -sort.d));
   }, [all, q, ex, only, sort]);
@@ -45,7 +47,7 @@ export default function AllTickers() {
         <select value={ex} onChange={(e) => setEx(e.target.value)} aria-label="Exchange" className="rounded-xl border border-ink-700 bg-ink-900 px-2.5 py-1.5 text-[13.5px] text-ink-100">
           {exchanges.map((e) => <option key={e}>{e}</option>)}
         </select>
-        <Tabs value={only} onChange={setOnly} items={[{ v: "all", label: "Everything" }, { v: "active", label: "With news or filings" }, { v: "model", label: "Model follows" }]} />
+        <Tabs value={only} onChange={setOnly} items={[{ v: "all", label: "Everything" }, { v: "active", label: "With news or filings" }, { v: "model", label: "Model scores" }]} />
         <span className="ml-auto text-[13px] text-ink-400">{rows.length.toLocaleString()} of {all.length.toLocaleString()} tickers · prices through {data.as_of}</span>
       </div>
       <div className="max-h-[720px] overflow-auto">
@@ -69,7 +71,8 @@ export default function AllTickers() {
               <td className="max-w-[360px] px-3"><span className="flex items-start gap-2">{r.tone && <ToneDot t={r.tone} />}<span className="truncate text-[13px] text-ink-300" title={r.line}>{r.line}</span></span></td>
               <td className="whitespace-nowrap px-4 text-right">
                 {r.action ? <Pill color={r.action === "BUY" ? "up" : "down"}>{r.action === "BUY" ? "Buy idea" : "Short idea"}</Pill>
-                  : r.accuracy != null ? <span className="num text-[12.5px] text-ink-400">{pct(r.accuracy, 0, false)} right</span> : <span className="text-[12.5px] text-ink-500">not modelled</span>}
+                  : r.accuracy != null ? <span className="num text-[12.5px] text-ink-400">{pct(r.accuracy, 0, false)} right</span>
+                    : r.score != null ? <span className="text-[12.5px] text-ink-400">scored, no record</span> : <span className="text-[12.5px] text-ink-400">not scored</span>}
               </td>
             </tr>))}</tbody>
         </table>
