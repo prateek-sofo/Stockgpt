@@ -26,7 +26,7 @@ class ModelConfig:
     # Walk-forward
     min_train_days: int = 250                   # ~1 trading year before first prediction
     retrain_every_days: int = int(os.getenv("STOCKGPT_RETRAIN_DAYS", "21"))   # 21 = monthly refit
-    target: str = os.getenv("STOCKGPT_TARGET", "z_x")    # z_x = stock-relative, z_oc = raw open->close
+    target: str = os.getenv("STOCKGPT_TARGET", "z_b")    # z_b = market-adjusted (minus beta x market), z_x = minus the average stock, z_oc = raw
     gbm_seeds: int = int(os.getenv("STOCKGPT_GBM_SEEDS", "3"))
     max_gbm_rows: int = int(os.getenv("STOCKGPT_MAX_GBM_ROWS", "1500000"))   # most recent rows for the GBMs
     embargo_days: int = 6                       # purge between train end and test start (>= longest label, 5 sessions)

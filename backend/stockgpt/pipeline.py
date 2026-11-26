@@ -152,7 +152,10 @@ def data_used(tables: dict, scan_date) -> list[dict]:
 
 def final_model(panel, features, cal_slope, max_rows: int = 3_000_000):
     last = panel.index.get_level_values("date").max()
-    keep = [c for c in panel.columns if c in set(features) | {"z_oc", "y_dir", "r_oc", "sig_d"}]
+    # the training target must travel with the features: without it the model silently fell back to the
+    # raw open-to-close move, so the live model was not the one the backtest tested
+    keep = [c for c in panel.columns if c in set(features) | {"z_oc", "y_dir", "r_oc", "sig_d", "z5_x", SETTINGS.model.target}]
+    assert SETTINGS.model.target in keep, f"target {SETTINGS.model.target} is not in the panel"
     train = panel.loc[panel.index.get_level_values("date") < last, keep]
     train = train.iloc[-max_rows:] if len(train) > max_rows else train      # most recent rows (memory)
     m = HierarchicalModel(features).fit(train)
@@ -285,7 +288,7 @@ def run(scan_only: bool = False, reuse: bool = False):
 
     if not scan_only:
         strat = {}
-        TRIALS = 16          # strategy / model variants tried on this data so far (ablation + research + sizing)
+        TRIALS = 20          # strategy / model variants tried on this data so far (ablation + research + sizing)
         for col, key in (("swing", "swing_5d"), ("stock", "stock_daytrade"), ("options", "options_daytrade"),
                          ("straddle", "earnings_straddle")):
             if col not in curve:

@@ -11,7 +11,7 @@ cd "$ROOT/frontend"
 rm -rf "$OUT"; mkdir -p "$OUT/data/tickers" "$OUT/data/light"
 VITE_STATIC=1 npx vite build --base ./ --outDir "$OUT" --emptyOutDir false >/dev/null
 sed -i '1s/<!doctype html>/<!DOCTYPE html>/' "$OUT/index.html"
-for f in brief backtest accuracy research ablation universe longterm meta market all journal; do
+for f in brief backtest accuracy research ablation universe longterm meta market all journal intraday; do
   [[ -f $ART/$f.json ]] && cp "$ART/$f.json" "$OUT/data/"
 done
 cp "$ART"/light/*.json "$OUT/data/light/" 2>/dev/null || true

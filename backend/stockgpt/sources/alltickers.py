@@ -45,11 +45,18 @@ def build(days: int = 400, fresh: bool = True, refresh: bool = False) -> pd.Data
     return px
 
 
+def _store():
+    """The long price history of every listed ticker. `assemble` reads it and writes the model's own
+    filtered copy (prices.parquet); it is never filtered or overwritten itself."""
+    raw = DATA_DIR / "prices_raw.parquet"
+    return raw if raw.exists() else DATA_DIR / "prices.parquet"
+
+
 def merge_into_model_prices() -> None:
     """Bring prices.parquet (the model's long history) up to date from the all-ticker table. Rows are
     added or replaced one (date, ticker) at a time: a ticker missing from today's download keeps the
     rows it already had, so a throttled download can never punch holes in the history."""
-    old = pd.read_parquet(DATA_DIR / "prices.parquet")
+    old = pd.read_parquet(_store())
     old["date"] = pd.to_datetime(old["date"]).dt.normalize()
     new = pd.read_parquet(OUT)
     cols = [c for c in old.columns if c in new.columns]           # extra columns (premarket) are re-attached by assemble
@@ -57,7 +64,7 @@ def merge_into_model_prices() -> None:
     new = new[(new["date"] > cut) & new["ticker"].isin(set(old["ticker"]))].dropna(subset=["open", "close"])
     df = pd.concat([old[cols], new[cols]], ignore_index=True)
     df = df.drop_duplicates(["date", "ticker"], keep="last").sort_values(["date", "ticker"])
-    df.to_parquet(DATA_DIR / "prices.parquet", index=False)
+    df.to_parquet(_store(), index=False)
     print(f"model prices now through {df['date'].max():%Y-%m-%d}; {coverage(df)['note']}")
 
 
@@ -77,7 +84,7 @@ def coverage(prices: pd.DataFrame, sessions: int = 15, tolerance: float = 0.02) 
 
 def repair(days: int = 45) -> None:
     """Refetch the recent history of the model's own tickers and fill any holes."""
-    old = pd.read_parquet(DATA_DIR / "prices.parquet")
+    old = pd.read_parquet(_store())
     old["date"] = pd.to_datetime(old["date"]).dt.normalize()
     start = (old["date"].max() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
     tick = sorted(set(old["ticker"]))
@@ -96,7 +103,7 @@ def repair(days: int = 45) -> None:
     cols = [c for c in old.columns if c in got.columns]
     df = pd.concat([old[cols], got.dropna(subset=["open", "close"])[cols]], ignore_index=True)
     df = df.drop_duplicates(["date", "ticker"], keep="last").sort_values(["date", "ticker"])
-    df.to_parquet(DATA_DIR / "prices.parquet", index=False)
+    df.to_parquet(_store(), index=False)
     print(f"repair: {got['ticker'].nunique():,} of {len(tick):,} tickers refetched; {coverage(df)['note']}")
 
 

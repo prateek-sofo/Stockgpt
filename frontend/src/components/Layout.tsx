@@ -9,6 +9,7 @@ import type { Meta } from "../lib/types";
 const NAV: { group?: string; items: { to: string; label: string; icon: typeof Activity }[] }[] = [
   { items: [{ to: "/", label: "Today", icon: Sunrise }] },
   { group: "The day", items: [
+    { to: "/news", label: "Live news", icon: Activity },
     { to: "/record", label: "Track record", icon: CalendarCheck },
     { to: "/market", label: "Market", icon: Globe2 },
   ] },

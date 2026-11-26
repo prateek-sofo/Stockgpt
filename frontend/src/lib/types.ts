@@ -199,3 +199,11 @@ export interface JournalDay { date: string; issued_at: string; status: "open" | 
 export interface JournalIndex { days: { date: string; issued_at: string; status: "open" | "settled"; ideas: number; result: DayResult | null; captures: number }[];
   tally: { days: number; ideas: number; right: number; hit_rate: number | null; pnl: number; total_return: number; since: string | null };
   curve: { date: string; equity: number; hit_rate: number | null }[]; generated_at: string }
+
+export interface Alert { id: string; ticker: string; name: string; headline: string; why: string; tone: Tone; source: string; url: string;
+  published_at: string; seen_at: string; lag_s: number; state: string; price: number; chg_day: number | null; chg_open: number | null;
+  rules: Partial<Record<"first_move" | "tone" | "model", 1 | -1>>; marks: Partial<Record<"m30" | "m60" | "close", { time: string; price: number; ret: number; rel: number }>> }
+export interface StudyTest { name: string; n: number; mean_bp: number; net_bp: number; t: number; win: number }
+export interface Intraday { generated_at: string; started: string; connected: { sofo: boolean; sec: boolean }; interval_s: number;
+  scorecard: { alerts: number; median_lag_s: number | null; rows: { rule: string; horizon: string; n: number; mean_bp: number; net_bp: number; win: number; t: number | null }[] };
+  alerts: Alert[]; study: Record<string, { events: number; period: string[]; tests: StudyTest[] }> | null }

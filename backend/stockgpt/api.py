@@ -112,6 +112,12 @@ def journal_day(day: str):
     return _load(f"journal/{day}.json")
 
 
+@app.get("/api/intraday")
+def intraday_feed():
+    """The two-minute loop's alerts and its scorecard (python -m stockgpt.intraday loop)."""
+    return _load("intraday.json")
+
+
 @app.get("/api/live/board")
 def live_board():
     """Today's ideas against live prices, with a live option quote for each."""

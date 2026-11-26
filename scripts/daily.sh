@@ -8,6 +8,8 @@
 #   scripts/daily.sh scan      tracker + today's model ideas. Needs the price history and backtest
 #                              from one earlier `scripts/local.sh real` (or `daily.sh full`).
 #   scripts/daily.sh full      weekly: refresh SEC bulk files, retrain, rerun the walk-forward backtest.
+#   python -m stockgpt.intraday loop   (run alongside, all session) the two-minute loop: new filings and
+#                              Sofo World articles, each stamped with a live price and marked later.
 #   scripts/daily.sh capture   during the session (for example 09:40 and 15:50 ET): note live stock and
 #                              option quotes for today's predictions.
 #   scripts/daily.sh close     after 16:15 ET: today's closing prices, mark every prediction right or
@@ -99,6 +101,8 @@ if [[ $MODE != tracker ]]; then
     step "Sofo World API: news published since the first pull"     # the scan sees articles up to this minute
     sofo_api
   fi
+  step "company events with their publication minute (SEC 8-K)"
+  $PY -m stockgpt.sources.events || echo "events not refreshed"
   step "model"
   $PY -m stockgpt.sources.snapshots premarket || true
   $PY -m stockgpt.sources.assemble --start 2019-01-01

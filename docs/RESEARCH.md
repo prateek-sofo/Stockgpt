@@ -119,3 +119,52 @@ What this says:
    2,545 stocks. Eight of the twenty ideas issued on Nov 20 were built on those gaps. Price merges now
    add or replace single rows and never delete, an unfinished session is never stored, and the scan
    reports incomplete prices on the Today page (`alltickers.coverage`).
+
+## 8. Events, speed, and the target (Nov 26, 2026)
+
+**Event history.** `sources/events.py` reads every 8-K since 2015 with the second EDGAR accepted it:
+479,014 filings by 5,999 companies; 28% before the open, 12% during trading, 61% after the close.
+
+**Does reacting fast to an event pay?** (`artifacts/event_study.json`; returns against the market
+over the same interval; 10 bp round trip.)
+
+| Test | Cases | Before costs | After costs | t |
+|---|---|---|---|---|
+| Filed during trading, follow the first move, next hour (hourly bars, 2 years) | 597 | -0.1 bp | -10.1 bp | -0.0 |
+| Same, to the close | 597 | -6.5 bp | -16.5 bp | -1.4 |
+| Filed overnight, follow the opening gap, open to close (2019 to 2026) | 106,089 | +3.4 bp | -6.6 bp | 2.9 |
+| Overnight results, gap up over 5%, next day | 5,354 | +13.2 bp | +3.2 bp | 2.5 |
+
+Following the first reaction to the fact of an event is not profitable in liquid stocks: the move is
+over by the time the filing is public (a press release usually precedes its 8-K by minutes). This
+matches the literature on liquid names. What remains untested is the content of the news, which needs
+an article history with true timestamps (Sofo World).
+
+**Does the model improve with events and a market-adjusted target?** Holdout, trained before 2024,
+tested 2024 to Nov 2026, liquid stocks, 6 bp round trip, top and bottom 25.
+
+| Model | IC vs market-adjusted return | Beta-matched book | Sharpe | Worst drawdown | Hit rate |
+|---|---|---|---|---|---|
+| Before: target = stock minus average stock | 0.0118 (t 2.2) | -1.0 bp a day | -0.26 | -17% | 50.9% |
+| Market-adjusted target | 0.0143 (t 2.8) | -0.4 | -0.13 | -16% | 51.0% |
+| + company events | 0.0118 (t 2.2) | +1.6 | 0.44 | -14% | 51.1% |
+| Both | 0.0155 (t 3.1) | +1.3 | 0.37 | -12% | 51.3% |
+| Both, three models averaged (adopted) | 0.0148 (t 2.9) | +1.9 | 0.55 | -11% | 51.3% |
+
+The gain is small and consistent by year (-0.2, +1.4, +4.8 bp a day in 2024, 2025, 2026). Adopted:
+`ModelConfig.target = "z_b"`, `features.event_features` (k8_*). These are variants 17 to 20 on this
+data; the deflated Sharpe counts them.
+
+**A bug this exposed.** `pipeline.final_model` dropped the target column before training, so the model
+used for the live scan silently trained on the raw open-to-close move while the walk-forward models
+trained on the relative one. Every live scan up to Nov 20 came from a model the backtest never tested.
+Fixed, with an assertion.
+
+**Universe.** The model now covers every exchange-listed operating company trading above $1 with at
+least $1M a day at some point: about 4,600 stocks, up from 2,534. Trading is still limited to the
+liquid set; the rest are scored and graded.
+
+**The two-minute loop** (`stockgpt/intraday.py`) polls the SEC real-time 8-K feed and, when connected,
+Sofo World; stamps each item with a live price; marks it 30 and 60 minutes later and at the close; and
+keeps a scorecard for three rules (follow the move so far, follow the tone, take the scan's side). It is
+a test bench, not a strategy.
