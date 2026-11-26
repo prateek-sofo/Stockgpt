@@ -313,6 +313,8 @@ def run(scan_only: bool = False, reuse: bool = False):
         cal = info["last_model"].cal_slope
 
     sig = build_signals(panel, preds, slim=True)
+    done = sig["r_oc"].notna().groupby(level="date").any()      # the pending session has no outcome yet: not a backtest day
+    sig = sig[sig.index.get_level_values("date").isin(done[done].index)]
     vendor_iv = panel.attrs.get("iv_source", "vendor") == "vendor"
     res = simulate(sig, straddles=vendor_iv)
     curve, trades = res["curve"], res["trades"]
