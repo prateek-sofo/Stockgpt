@@ -1,0 +1,13 @@
+[Unit]
+Description=StockGPT two-minute loop: new Sofo World news and SEC filings, live prices, marks at 30 and 60 minutes
+After=network-online.target
+
+[Service]
+User=stockgpt
+ExecStart=/srv/stockgpt/current/infra/aws/intraday.sh
+Restart=always
+RestartSec=30
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

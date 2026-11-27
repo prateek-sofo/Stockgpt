@@ -81,8 +81,28 @@ def edgar_items() -> list[dict]:
     return out
 
 
-def sofo_items() -> list[dict]:
+def sofo_db_items(state: dict) -> list[dict]:
+    """Beside the Sofo World database (the AWS box or the hub): read what it first saw since the last cycle."""
+    from datetime import timedelta
+    from .sources import sofo_world
+    after = state.get("sofo_after") or (_now() - timedelta(minutes=10)).isoformat()
+    rows = sofo_world.latest(os.environ["SOFO_DATABASE_URL"], after)
+    if not len(rows):
+        return []
+    state["sofo_after"] = pd.Timestamp(rows["first_seen"].max()).isoformat()
+    return [dict(id=f"sofo:{r.url}:{r.ticker}", ticker=r.ticker, published_at=pd.Timestamp(r.published_at).isoformat(),
+                 headline=r.headline, url=r.url, source=r.source or "Sofo World",
+                 first_seen=pd.Timestamp(r.first_seen).isoformat()) for r in rows.itertuples()]
+
+
+def sofo_items(state: dict | None = None) -> list[dict]:
     """Articles Sofo World has seen since our last pull (only when it is connected)."""
+    if os.environ.get("SOFO_DATABASE_URL") and state is not None:
+        try:
+            return sofo_db_items(state)
+        except Exception as ex:                        # the SEC feed still runs if the database is away
+            print(f"sofo world read failed: {ex}", flush=True)
+            return []
     if not os.environ.get("SOFO_WORLD_URL"):
         return []
     from .sources import sofo_api
@@ -113,7 +133,7 @@ def poll(brief: dict | None = None) -> int:
     ideas = {i["ticker"]: i["action"] for i in (brief or {}).get("longs", []) + (brief or {}).get("shorts", [])}
     first_run = not state["seen"]
     fresh = []
-    for it in edgar_items() + sofo_items():
+    for it in edgar_items() + sofo_items(state):
         if it["id"] in seen:
             continue
         seen.add(it["id"])

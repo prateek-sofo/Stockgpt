@@ -148,6 +148,17 @@ def _dedupe(df: pd.DataFrame) -> pd.DataFrame:
     return df.assign(_key=key).sort_values("published_at").drop_duplicates(["_key", "ticker"]).drop(columns="_key")
 
 
+def latest(dsn: str, after: str, limit: int = 2000) -> pd.DataFrame:
+    """Articles and events Sofo World first saw after `after` (an ISO timestamp): the incremental read the
+    two-minute loop uses. One small indexed query per cycle; nothing is re-read."""
+    import psycopg  # optional dependency
+
+    sql = NEWS_SQL + "  AND a.first_seen > %(after)s\nORDER BY a.first_seen\nLIMIT %(limit)s"
+    with psycopg.connect(dsn, options="-c default_transaction_read_only=on -c statement_timeout=20000") as conn:
+        df = pd.read_sql(sql, conn, params=dict(since="2000-01-01", min_salience=MIN_SALIENCE, after=after, limit=limit))
+    return df.dropna(subset=["ticker", "published_at", "headline"])
+
+
 def export(dsn: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None = None) -> pd.DataFrame:
     import psycopg  # optional dependency
 
