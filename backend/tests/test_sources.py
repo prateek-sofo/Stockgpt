@@ -157,3 +157,23 @@ def test_scan_targets_the_session_after_the_last_close():
     new = out[out["date"] == "2026-11-20"].set_index("ticker")
     assert list(new.index) == ["A", "B"] and new["close"].isna().all() and new.loc["B", "premarket"] == 3.3
     assert len(add_pending_session(out, pre)) == len(out)               # never added twice
+
+
+def test_lake_news_is_point_in_time_and_mapped(monkeypatch):
+    from stockgpt.sources import sofo_lake
+
+    rows = pd.DataFrame({
+        "article_id": ["a", "b", "c"], "cik": ["0000320193", "320193", "999"],
+        "headline": ["late find", "on time", "unlisted"], "body": ["s1", "s2", "s3"], "url": ["u1", "u2", "u3"], "source": ["x.com"] * 3,
+        "published_at": ["2026-03-02 14:00:00", "2026-03-03 14:00:00", "2026-03-03 14:00:00"],
+        "fetched_at": ["2026-03-05 09:00:00", "2026-03-03 14:05:00", "2026-03-03 14:05:00"],
+        "salience": ["0.9"] * 3, "role": ["subject"] * 3,
+    })
+    monkeypatch.setattr(sofo_lake, "query", lambda sql, timeout=0: (rows.copy(), dict(bytes=0, usd=0)))
+    sec = pd.DataFrame({"cik": ["320193"], "ticker": ["AAPL"], "name": ["Apple"]})
+    out = sofo_lake.news("2026-03-01", sec).set_index("headline")
+    assert set(out.index) == {"late find", "on time"}            # unlisted company dropped
+    assert (out["ticker"] == "AAPL").all()
+    # a story fetched days late is visible no earlier than publish + 6 h, never before it was published
+    assert out.loc["late find", "published_at"] == pd.Timestamp("2026-03-02 20:00", tz="UTC")
+    assert out.loc["on time", "published_at"] == pd.Timestamp("2026-03-03 14:05", tz="UTC")
