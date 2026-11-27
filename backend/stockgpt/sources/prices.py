@@ -73,7 +73,7 @@ def polygon(start: str, end: str | None = None, tickers: set[str] | None = None,
 
 
 def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0,
-          cache_dir: Path | None = None) -> pd.DataFrame:
+          cache_dir: Path | None = None, threads: int | bool = False) -> pd.DataFrame:
     """Open-source route: yfinance (Apache-2.0) over Yahoo Finance's public daily bars.
     Split- and dividend-adjusted OHLCV. Batched and paced; each batch is cached so a rerun resumes."""
     import yfinance as yf
@@ -88,7 +88,7 @@ def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0
             frames.append(pd.read_parquet(f))
             continue
         ymap = {t.replace(".", "-"): t for t in chunk}            # BRK.B -> BRK-B on Yahoo
-        raw = yf.download(list(ymap), start=start, auto_adjust=True, progress=False, threads=False,
+        raw = yf.download(list(ymap), start=start, auto_adjust=True, progress=False, threads=threads,
                           group_by="column")
         if raw is None or raw.empty:
             pd.DataFrame().to_parquet(f)
@@ -102,7 +102,11 @@ def yahoo(tickers: list[str], start: str, batch: int = 100, pause_s: float = 2.0
         frames.append(df)
         print(f"  batch {i // batch + 1}/{-(-len(syms) // batch)}: {df['ticker'].nunique()} tickers", flush=True)
         time.sleep(pause_s)
-    return pd.concat([f for f in frames if len(f)], ignore_index=True)
+    from ..sessions import closed_only
+    frames = [f for f in frames if len(f)]
+    if not frames:                                 # nothing came back (delisted names, or a throttled run)
+        return pd.DataFrame(columns=["date", "ticker", "open", "high", "low", "close", "volume"])
+    return closed_only(pd.concat(frames, ignore_index=True))   # never an unfinished session
 
 
 def tiingo(tickers: list[str], start: str, min_interval_s: float = 0.1) -> pd.DataFrame:

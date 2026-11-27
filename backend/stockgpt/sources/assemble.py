@@ -17,8 +17,16 @@ import pandas as pd
 from ..config import DATA_DIR
 
 
-def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int = 120,
-             ever_dollar_volume: float = 20e6) -> dict:
+CORE = dict(min_price=3.0, ever_dollar_volume=20e6)     # trained and backtested: deep, liquid history (about 2,500 stocks)
+WIDE = dict(min_price=1.0, ever_dollar_volume=1e6)      # scored every day: every listed operating company that trades (about 4,600)
+
+
+def assemble(start: str = "2019-01-01", min_price: float = CORE["min_price"], min_history: int = 120,
+             ever_dollar_volume: float = CORE["ever_dollar_volume"]) -> dict:
+    """Two universes come out of this function. The core one (the defaults) is what the model is
+    trained and walk-forward tested on. The wide one (`**WIDE`, a recent window) is what the trained
+    model scores each morning, so every listed stock that trades gets a view. Seven years of features
+    for the wide set does not fit in 16 GB of memory; a recent window does."""
     t = pd.read_parquet(DATA_DIR / "sec_tickers.parquet")
     # operating companies only: an SEC industry code, and not a blank-check shell (6770), commodity pool /
     # ETP (6221) or unit investment trust (6726)
@@ -28,7 +36,8 @@ def assemble(start: str = "2019-01-01", min_price: float = 3.0, min_history: int
     # keep its primary ticker. Two or three share classes (GOOG/GOOGL, BRK.A/BRK.B) are kept as listed.
     n = t.groupby("cik")["ticker"].transform("size")
     t = t[(n <= 3) | ~t.duplicated("cik")]
-    px = pd.read_parquet(DATA_DIR / "prices.parquet")
+    raw = DATA_DIR / "prices_raw.parquet"           # the unfiltered history; prices.parquet is this function's output
+    px = pd.read_parquet(raw if raw.exists() else DATA_DIR / "prices.parquet")
     px["date"] = pd.to_datetime(px["date"]).dt.normalize().astype("datetime64[ns]")
     px = px[(px["date"] >= start) & px["ticker"].isin(t["ticker"])]
     # common stocks with enough history and a tradable price

@@ -26,13 +26,13 @@ export default function Longterm() {
           <div className="h-[360px]">
             <ResponsiveContainer>
               <AreaChart data={data.backtest.curve} margin={{ left: 0, right: 8, top: 8 }}>
-                <defs><linearGradient id="lt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#2ee6a6" stopOpacity={0.3} /><stop offset="1" stopColor="#2ee6a6" stopOpacity={0} /></linearGradient></defs>
+                <defs><linearGradient id="lt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="var(--color-up)" stopOpacity={0.3} /><stop offset="1" stopColor="var(--color-up)" stopOpacity={0} /></linearGradient></defs>
                 <CartesianGrid vertical={false} />
                 <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={60} />
                 <YAxis tickFormatter={(v) => `$${v.toFixed(2)}`} tickLine={false} axisLine={false} width={50} domain={["auto", "auto"]} />
                 <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [`$${v.toFixed(3)}`, n]} />
-                <Area dataKey="top" stroke="#2ee6a6" fill="url(#lt)" strokeWidth={2} name="Top quintile" />
-                <Line dataKey="universe" stroke="#5d6a88" strokeDasharray="4 4" dot={false} name="Universe" />
+                <Area dataKey="top" stroke="var(--color-up)" fill="url(#lt)" strokeWidth={2} name="Top quintile" />
+                <Line dataKey="universe" stroke="var(--color-ink-400)" strokeDasharray="4 4" dot={false} name="Universe" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -41,9 +41,9 @@ export default function Longterm() {
           <div className="max-h-[400px] overflow-auto px-5 pb-4">
             {data.ranking.map((r, i) => (
               <Link key={r.ticker} to={`/t/${r.ticker}`} className="flex items-start gap-3 border-t border-ink-800/70 py-2.5 first:border-0 hover:bg-ink-800/30">
-                <span className="num w-6 pt-0.5 text-[11px] text-ink-500">{i + 1}</span>
+                <span className="num w-6 pt-0.5 text-[12.5px] text-ink-500">{i + 1}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2"><span className="font-semibold">{r.ticker}</span><span className="truncate text-[11px] text-ink-500">{r.name}</span></div>
+                  <div className="flex items-baseline gap-2"><span className="font-semibold">{r.ticker}</span><span className="truncate text-[12.5px] text-ink-500">{r.name}</span></div>
                   <div className="mt-1 flex flex-wrap gap-1">{r.drivers.map((d) => (
                     <span key={d.label} className={clsx("chip ring-1", d.z > 0 ? "bg-up/8 text-up ring-up/20" : "bg-down/8 text-down ring-down/20")}>{d.label} {d.z > 0 ? "+" : ""}{d.z.toFixed(1)}σ</span>))}</div>
                 </div>

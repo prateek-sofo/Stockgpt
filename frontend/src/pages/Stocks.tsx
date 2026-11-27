@@ -1,32 +1,34 @@
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Target, X } from "lucide-react";
+import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, chartTooltip, ErrorBox, Loading, PageHeader, Pill, Stat, Tabs } from "../components/ui";
 import { useApi } from "../lib/api";
 import { num, pct, tone } from "../lib/format";
-import type { AccuracyData, AccuracyDetail, AccuracyRow, FundHorizon, IndexFund, TickerProfile } from "../lib/types";
+import AllTickers from "./AllTickers";
+import type { AccuracyData, AccuracyDetail, AccuracyRow, FundHorizon, IndexFund, TickerProfile, UniverseRow } from "../lib/types";
 
 const accTone = (a: number | null | undefined, z?: number | null) =>
   a == null ? "text-ink-500" : z != null && Math.abs(z) < 2 ? "text-ink-200" : a > 0.5 ? "text-up" : "text-down";
 
-type SortKey = keyof AccuracyRow;
-const COLS: { k: SortKey; label: string; hint: string; fmt: (r: AccuracyRow) => React.ReactNode; cls?: (r: AccuracyRow) => string }[] = [
-  { k: "days", label: "Days", hint: "out-of-sample sessions predicted", fmt: (r) => r.days.toLocaleString() },
-  { k: "rel_accuracy", label: "Accuracy", hint: "called the stock's open-to-close move vs the market correctly", fmt: (r) => pct(r.rel_accuracy, 1, false), cls: (r) => accTone(r.rel_accuracy, r.z) },
-  { k: "z", label: "z", hint: "standard errors from a coin flip; |z| > 2 is unlikely by chance for one stock", fmt: (r) => num(r.z, 1), cls: (r) => (Math.abs(r.z) >= 2 ? tone(r.z) : "text-ink-400") },
-  { k: "strong_accuracy", label: "Strong-signal acc.", hint: "accuracy on days it ranked in the top or bottom 10% (the days it would be traded)", fmt: (r) => (r.strong_accuracy == null ? "–" : pct(r.strong_accuracy, 1, false)), cls: (r) => accTone(r.strong_accuracy) },
-  { k: "strong_n", label: "Strong days", hint: "number of strong-signal days", fmt: (r) => r.strong_n },
-  { k: "signal_bps", label: "Signal bps/day", hint: "average daily return of following the model's sign on the relative move, before costs", fmt: (r) => num(r.signal_bps, 1), cls: (r) => tone(r.signal_bps) },
-  { k: "ic", label: "IC", hint: "rank correlation of prediction and outcome over time", fmt: (r) => num(r.ic, 3), cls: (r) => tone(r.ic) },
-  { k: "up_accuracy", label: "Up/down acc.", hint: "raw up/down calls; compare with the stock's own up-day rate", fmt: (r) => `${pct(r.up_accuracy, 1, false)} (${pct(r.up_rate, 0, false)} up)` },
-  { k: "acc_5d", label: "5-day acc.", hint: "5-session model, non-overlapping periods", fmt: (r) => (r.acc_5d == null ? "–" : pct(r.acc_5d, 1, false)), cls: (r) => accTone(r.acc_5d, r.z_5d) },
+type Row = AccuracyRow & { price?: number; chg?: number; days_to_earn?: number };
+type SortKey = keyof Row;
+const COLS: { k: SortKey; label: string; hint: string; fmt: (r: Row) => React.ReactNode; cls?: (r: Row) => string }[] = [
+  { k: "price", label: "Price", hint: "last close", fmt: (r) => (r.price == null ? "–" : num(r.price, 2)) },
+  { k: "chg", label: "Last day", hint: "last session's move", fmt: (r) => pct(r.chg, 1), cls: (r) => tone(r.chg) },
+  { k: "strong_accuracy", label: "Strong calls right", hint: "how often the model was right on days this stock ranked in its top or bottom 10% (the days it would be traded)", fmt: (r) => (r.strong_accuracy == null ? "–" : pct(r.strong_accuracy, 0, false)), cls: (r) => accTone(r.strong_accuracy) },
+  { k: "strong_n", label: "Strong calls", hint: "number of those days", fmt: (r) => r.strong_n },
+  { k: "rel_accuracy", label: "All days right", hint: "share of all days the model called the stock's move against the market correctly", fmt: (r) => pct(r.rel_accuracy, 1, false), cls: (r) => accTone(r.rel_accuracy, r.z) },
+  { k: "signal_bps", label: "Edge per day", hint: "average daily return of following the model on this stock, in basis points, before costs", fmt: (r) => `${num(r.signal_bps, 1)} bps`, cls: (r) => tone(r.signal_bps) },
+  { k: "z", label: "Confidence", hint: "how far the record is from a coin flip, in standard errors. Above 2 is unlikely to be luck for a single stock.", fmt: (r) => (Math.abs(r.z) >= 3 ? "high" : Math.abs(r.z) >= 2 ? "fair" : "low"), cls: (r) => (r.z >= 2 ? "text-up" : r.z <= -2 ? "text-down" : "text-ink-400") },
+  { k: "days_to_earn", label: "Earnings", hint: "sessions until the next report", fmt: (r) => (r.days_to_earn != null && r.days_to_earn < 900 ? `${r.days_to_earn}d` : "–"), cls: (r) => (r.days_to_earn != null && r.days_to_earn <= 5 ? "text-amber" : "") },
 ];
 
-export default function Accuracy() {
+export default function Stocks() {
   const { data, error } = useApi<AccuracyData>("accuracy");
-  const [tab, setTab] = useState<"stocks" | "index">("stocks");
+  const { data: uni } = useApi<UniverseRow[]>("universe");
+  const [tab, setTab] = useState<"all" | "stocks" | "index">("all");
   const [q, setQ] = useState("");
   const [liquidOnly, setLiquidOnly] = useState(true);
   const [sort, setSort] = useState<{ k: SortKey; d: 1 | -1 }>({ k: "strong_accuracy", d: -1 });
@@ -34,34 +36,34 @@ export default function Accuracy() {
   const [fund, setFund] = useState<string | null>("SPY");
   const rows = useMemo(() => {
     if (!data) return [];
+    const u = new Map((uni ?? []).map((x) => [x.ticker, x]));
     const ql = q.toLowerCase();
     return data.stocks
+      .map((r): Row => ({ ...r, price: u.get(r.ticker)?.price, chg: u.get(r.ticker)?.chg, days_to_earn: u.get(r.ticker)?.days_to_earn }))
       .filter((r) => (!liquidOnly || r.liquid_share > 0.5) && (!ql || r.ticker.toLowerCase().includes(ql) || (r.name ?? "").toLowerCase().includes(ql)))
       .sort((a, b) => (((a[sort.k] as number) ?? -1e9) > ((b[sort.k] as number) ?? -1e9) ? sort.d : -sort.d));
-  }, [data, q, liquidOnly, sort]);
+  }, [data, uni, q, liquidOnly, sort]);
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
   const s = data.summary;
   const hist = s.hist.map((c, i) => ({ c, x: (s.hist_edges[i] + s.hist_edges[i + 1]) / 2 }));
   return (
     <div>
-      <PageHeader title={<span className="flex items-center gap-3"><Target className="h-6 w-6 text-accent" />Model Accuracy</span>}
-        sub={`Walk-forward, out-of-sample only · ${data.period.start} → ${data.period.end} · every prediction was made by a model that had not seen that day`}
-        right={<Tabs value={tab} onChange={setTab} items={[{ v: "stocks", label: `Stocks (${data.stocks.length})` }, { v: "index", label: `Index funds (${data.index?.funds.length ?? 0})` }]} />} />
+      <PageHeader title="Stocks"
+        sub={tab === "all" ? "Every publicly traded ticker the SEC lists, with its price, filings, news and a one-line read of what is happening. Click a row for the full picture."
+          : `Every stock the model follows, with how often it has been right on that stock. All figures are out-of-sample, ${data.period.start} to ${data.period.end}. Click a row for the detail.`}
+        right={<Tabs value={tab} onChange={setTab} items={[{ v: "all", label: "All tickers" }, { v: "stocks", label: `Model accuracy (${data.stocks.length.toLocaleString()})` }, { v: "index", label: `Index funds (${data.index?.funds.length ?? 0})` }]} />} />
 
-      {tab === "stocks" ? (<>
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-          <Stat label="Median accuracy" value={pct(s.median_accuracy, 1, false)} sub="per stock, vs the market, all days" hint="50% is a coin flip" />
-          <Stat label="Liquid names" value={pct(s.liquid_median_accuracy, 1, false)} sub="median, tradable universe" />
-          <Stat label="Strong-signal days" value={pct(s.strong_median_accuracy, 1, false)} sub="median accuracy when ranked top/bottom 10%" valueClass={s.strong_median_accuracy > 0.5 ? "text-up" : "text-down"} />
-          <Stat label="Above 55%" value={s.above_55} sub={`${s.below_45} below 45%`} />
-          <Stat label="Significantly good" value={s.significant_good} sub={`z > 2 · ~${num(s.expected_by_chance, 0)} expected by luck`} valueClass={s.significant_good > 2 * s.expected_by_chance ? "text-up" : "text-ink-100"}
-            hint="With thousands of stocks, about 2.3% clear z > 2 by chance alone. More than that suggests real per-stock skill." />
-          <Stat label="Significantly bad" value={s.significant_bad} sub="z < −2" />
+      {tab === "all" ? <AllTickers /> : tab === "stocks" ? (<>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Stat label="Typical stock, strong calls" value={pct(s.strong_median_accuracy, 1, false)} sub="right, on the days it would be traded. A coin flip is 50%." valueClass={s.strong_median_accuracy > 0.5 ? "text-up" : "text-down"} />
+          <Stat label="Typical stock, all days" value={pct(s.median_accuracy, 1, false)} sub="right against the market" />
+          <Stat label="Stocks it reads well" value={s.significant_good} sub={`clearly better than chance; about ${num(s.expected_by_chance, 0)} would be by luck`} valueClass="text-up" />
+          <Stat label="Stocks it reads badly" value={s.significant_bad} sub="clearly worse than chance" />
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[420px_1fr]">
-          <Card title="Distribution of per-stock accuracy" right={<span className="text-[11px] text-ink-500">stocks per bucket</span>}>
+          <Card title="How accurate, across all stocks">
             <div className="h-[220px]">
               <ResponsiveContainer>
                 <BarChart data={hist} margin={{ left: -18 }}>
@@ -69,17 +71,17 @@ export default function Accuracy() {
                   <XAxis dataKey="x" tickFormatter={(v) => pct(v, 0, false)} tickLine={false} axisLine={false} />
                   <YAxis tickLine={false} axisLine={false} />
                   <Tooltip {...chartTooltip} formatter={(v: number) => [v, "stocks"]} labelFormatter={(l) => `accuracy ≈ ${pct(Number(l), 1, false)}`} />
-                  <ReferenceLine x={0.5} stroke="#8a96b3" strokeDasharray="4 4" />
-                  <Bar dataKey="c" radius={[3, 3, 0, 0]}>{hist.map((h, i) => <Cell key={i} fill={h.x >= 0.5 ? "#2ee6a6" : "#ff5c7a"} fillOpacity={0.55} />)}</Bar>
+                  <ReferenceLine x={0.5} stroke="var(--color-ink-300)" strokeDasharray="4 4" />
+                  <Bar dataKey="c" radius={[3, 3, 0, 0]}>{hist.map((h, i) => <Cell key={i} fill={h.x >= 0.5 ? "var(--color-up)" : "var(--color-down)"} fillOpacity={0.55} />)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-ink-400">How to read it: a model with no skill gives a bell centred on 50%. Skill shows as the whole bell sitting right of the dashed line, and as more "significantly good" stocks than luck explains.</p>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-400">Each bar counts stocks by how often the model was right on them. With no skill the bars would centre on the dashed 50% line; they sit a little to its right.</p>
           </Card>
           {sel ? <StockDetail ticker={sel} onClose={() => setSel(null)} /> : (
             <Card title="Pick a stock">
-              <div className="grid h-[250px] place-items-center text-center text-[13px] text-ink-400">
-                <div>Click any row below to see how the model did on that stock:<br />cumulative result of following its signal, accuracy by year, and rolling accuracy.</div>
+              <div className="grid h-[250px] place-items-center text-center text-[14px] text-ink-400">
+                <div>Click any row below to see how the model did on that stock:<br />the result of following it, and its accuracy year by year.</div>
               </div>
             </Card>)}
         </div>
@@ -88,10 +90,10 @@ export default function Accuracy() {
           <div className="flex flex-wrap items-center gap-3 border-b border-ink-800 px-4 py-3">
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter ticker or name…" className="rounded-xl border border-ink-700 bg-ink-900 px-3 py-1.5 text-[13px] outline-none focus:border-accent/60" />
             <Tabs value={liquidOnly ? "liquid" : "all"} onChange={(v) => setLiquidOnly(v === "liquid")} items={[{ v: "liquid", label: "Liquid" }, { v: "all", label: "All" }]} />
-            <span className="ml-auto text-[11.5px] text-ink-500">{rows.length} stocks · colour only where |z| ≥ 2 · click a header to sort</span>
+            <span className="ml-auto text-[13.5px] text-ink-400">{rows.length} stocks · click a column to sort</span>
           </div>
           <div className="max-h-[640px] overflow-auto">
-            <table className="w-full text-[12.5px]">
+            <table className="w-full text-[13.5px]">
               <thead className="sticky top-0 z-10 bg-ink-900/95 backdrop-blur"><tr className="text-left text-ink-500">
                 <th className="px-4 py-2.5 font-medium">Stock</th>
                 {COLS.map((c) => (
@@ -104,7 +106,7 @@ export default function Accuracy() {
                 <tr key={r.ticker} onClick={() => setSel(r.ticker)}
                   className={clsx("cursor-pointer border-t border-ink-800/70 transition hover:bg-ink-800/50", sel === r.ticker && "bg-ink-800/70")}>
                   <td className="px-4 py-2"><span className="font-semibold">{r.ticker}</span>
-                    <span className="ml-2 inline-block max-w-[200px] truncate align-bottom text-[11px] text-ink-500">{r.name}</span></td>
+                    <span className="ml-2 inline-block max-w-[200px] truncate align-bottom text-[12.5px] text-ink-500">{r.name}</span></td>
                   {COLS.map((c) => <td key={c.k} className={clsx("num px-2 text-right", c.cls?.(r))}>{c.fmt(r)}</td>)}
                 </tr>))}</tbody>
             </table>
@@ -121,7 +123,7 @@ function StockDetail({ ticker, onClose }: { ticker: string; onClose: () => void 
   const a: AccuracyDetail | null | undefined = data?.accuracy;
   return (
     <Card title={<span className="flex items-center gap-2"><Link to={`/t/${ticker}`} className="text-[15px] font-semibold hover:text-accent">{ticker}</Link>
-      <span className="text-[12px] font-normal text-ink-400">{data?.name}</span></span>}
+      <span className="text-[13px] font-normal text-ink-400">{data?.name}</span></span>}
       right={<button onClick={onClose} className="rounded-lg p-1 text-ink-400 hover:bg-ink-800 hover:text-ink-100"><X className="h-4 w-4" /></button>}>
       {!a ? <div className="grid h-[250px] place-items-center text-[13px] text-ink-500">{data ? "Not enough out-of-sample days for this stock." : "Loading…"}</div> : (
         <div className="grid gap-4 lg:grid-cols-[1fr_260px]">
@@ -134,13 +136,13 @@ function StockDetail({ ticker, onClose }: { ticker: string; onClose: () => void 
                   <XAxis dataKey="d" tickLine={false} axisLine={false} minTickGap={70} />
                   <YAxis tickFormatter={(v) => pct(v, 0)} tickLine={false} axisLine={false} />
                   <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [pct(v, 1), n]} />
-                  <ReferenceLine y={0} stroke="#3a4560" />
-                  <Line dataKey="signal" stroke="#8b7bff" dot={false} strokeWidth={2} name="following the model" />
-                  <Line dataKey="stock" stroke="#5d6a88" dot={false} strokeWidth={1.2} strokeDasharray="4 3" name="stock open→close" />
+                  <ReferenceLine y={0} stroke="var(--color-ink-500)" />
+                  <Line dataKey="signal" stroke="var(--color-accent)" dot={false} strokeWidth={2} name="following the model" />
+                  <Line dataKey="stock" stroke="var(--color-ink-400)" dot={false} strokeWidth={1.2} strokeDasharray="4 3" name="stock open→close" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-ink-400">
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-400">
               <span>accuracy <b className={clsx("num", accTone(a.rel_accuracy, a.z))}>{pct(a.rel_accuracy, 1, false)}</b> over {a.days} days (z {num(a.z, 1)})</span>
               <span>strong-signal <b className={clsx("num", accTone(a.strong_accuracy))}>{a.strong_accuracy == null ? "–" : pct(a.strong_accuracy, 1, false)}</b> on {a.strong_n} days</span>
               <span>signal <b className={clsx("num", tone(a.signal_bps))}>{num(a.signal_bps, 1)} bps/day</b></span>
@@ -156,8 +158,8 @@ function StockDetail({ ticker, onClose }: { ticker: string; onClose: () => void 
                   <XAxis dataKey="year" tickLine={false} axisLine={false} />
                   <YAxis domain={[0.4, 0.6]} tickFormatter={(v) => pct(v, 0, false)} tickLine={false} axisLine={false} />
                   <Tooltip {...chartTooltip} formatter={(v: number) => [pct(v, 1, false), "accuracy"]} />
-                  <ReferenceLine y={0.5} stroke="#8a96b3" strokeDasharray="4 4" />
-                  <Bar dataKey="accuracy" radius={[3, 3, 0, 0]}>{a.by_year.map((y, i) => <Cell key={i} fill={y.accuracy >= 0.5 ? "#2ee6a6" : "#ff5c7a"} fillOpacity={0.6} />)}</Bar>
+                  <ReferenceLine y={0.5} stroke="var(--color-ink-300)" strokeDasharray="4 4" />
+                  <Bar dataKey="accuracy" radius={[3, 3, 0, 0]}>{a.by_year.map((y, i) => <Cell key={i} fill={y.accuracy >= 0.5 ? "var(--color-up)" : "var(--color-down)"} fillOpacity={0.6} />)}</Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -176,7 +178,7 @@ function IndexFunds({ funds, period, sel, setSel }: { funds: IndexFund[]; period
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Tabs value={h} onChange={setH} items={[{ v: "h1", label: "Next session (open → close)" }, { v: "h5", label: "Next 5 sessions" }]} />
-        <span className="text-[12px] text-ink-400">{period.start} → {period.end} · one pooled model, refit every quarter · "naive" = always predicting the more common direction</span>
+        <span className="text-[13px] text-ink-400">{period.start} → {period.end} · one pooled model, refit every quarter · "naive" = always predicting the more common direction</span>
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Funds beating naive" value={`${beat} / ${funds.length}`} sub="accuracy above always-up / always-down" valueClass={beat > funds.length / 2 ? "text-up" : "text-ink-100"} />
@@ -186,7 +188,7 @@ function IndexFunds({ funds, period, sel, setSel }: { funds: IndexFund[]; period
       </div>
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_520px]">
         <div className="card overflow-hidden">
-          <table className="w-full text-[12.5px]">
+          <table className="w-full text-[13.5px]">
             <thead><tr className="text-left text-ink-500">
               <th className="px-4 py-2.5 font-medium">Fund</th><th className="px-2 text-right font-medium">Periods</th>
               <th className="px-2 text-right font-medium" title="share of periods called correctly">Accuracy</th>
@@ -197,7 +199,7 @@ function IndexFunds({ funds, period, sel, setSel }: { funds: IndexFund[]; period
             </tr></thead>
             <tbody>{funds.map((x) => { const r = x[h]; return (
               <tr key={x.ticker} onClick={() => setSel(x.ticker)} className={clsx("cursor-pointer border-t border-ink-800/70 hover:bg-ink-800/50", x.ticker === f.ticker && "bg-ink-800/70")}>
-                <td className="px-4 py-2"><span className="font-semibold">{x.ticker}</span><span className="ml-2 text-[11px] text-ink-500">{x.name}</span></td>
+                <td className="px-4 py-2"><span className="font-semibold">{x.ticker}</span><span className="ml-2 text-[12.5px] text-ink-500">{x.name}</span></td>
                 <td className="num px-2 text-right">{r.n}</td>
                 <td className={clsx("num px-2 text-right", r.accuracy > r.best_naive ? "text-up" : "text-ink-200")}>{pct(r.accuracy, 1, false)}</td>
                 <td className="num px-2 text-right text-ink-400">{pct(r.best_naive, 1, false)}</td>
@@ -207,7 +209,7 @@ function IndexFunds({ funds, period, sel, setSel }: { funds: IndexFund[]; period
               </tr>); })}</tbody>
           </table>
         </div>
-        <Card title={<span className="flex items-center gap-2">{f.ticker} <span className="text-[12px] font-normal text-ink-400">{f.name}</span>
+        <Card title={<span className="flex items-center gap-2">{f.ticker} <span className="text-[13px] font-normal text-ink-400">{f.name}</span>
           {d.accuracy > d.best_naive ? <Pill color="up">beats naive</Pill> : <Pill>no edge over naive</Pill>}</span>}>
           <div className="label mb-1">Cumulative log return: trading the signal long/short vs holding{h === "h1" ? " (open → close only)" : ""}</div>
           <div className="h-[220px]">
@@ -217,9 +219,9 @@ function IndexFunds({ funds, period, sel, setSel }: { funds: IndexFund[]; period
                 <XAxis dataKey="d" tickLine={false} axisLine={false} minTickGap={70} />
                 <YAxis tickFormatter={(v) => pct(v, 0)} tickLine={false} axisLine={false} />
                 <Tooltip {...chartTooltip} formatter={(v: number, n: string) => [pct(v, 1), n]} />
-                <ReferenceLine y={0} stroke="#3a4560" />
-                <Line dataKey="signal" stroke="#8b7bff" dot={false} strokeWidth={2} name="model signal" />
-                <Line dataKey="buyhold" stroke="#5d6a88" dot={false} strokeWidth={1.2} strokeDasharray="4 3" name="holding" />
+                <ReferenceLine y={0} stroke="var(--color-ink-500)" />
+                <Line dataKey="signal" stroke="var(--color-accent)" dot={false} strokeWidth={2} name="model signal" />
+                <Line dataKey="buyhold" stroke="var(--color-ink-400)" dot={false} strokeWidth={1.2} strokeDasharray="4 3" name="holding" />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -227,7 +229,7 @@ function IndexFunds({ funds, period, sel, setSel }: { funds: IndexFund[]; period
             {Object.entries(d.by_year).map(([y, a]) => (
               <span key={y} className={clsx("chip ring-1", a >= d.best_naive ? "bg-up/8 text-up ring-up/20" : "bg-ink-800 text-ink-300 ring-ink-700")}>{y} <b className="num">{pct(a, 0, false)}</b></span>))}
           </div>
-          <p className="mt-3 text-[12px] leading-relaxed text-ink-400">Index direction is the hardest case in the literature (Welch & Goyal 2008): funds rise on {pct(d.up_rate, 0, false)} of periods, so "always up" is the bar to clear. Use this page to see whether the model clears it before trading index options on its signal.</p>
+          <p className="mt-3 text-[13px] leading-relaxed text-ink-400">Index direction is the hardest case in the literature (Welch & Goyal 2008): funds rise on {pct(d.up_rate, 0, false)} of periods, so "always up" is the bar to clear. Use this page to see whether the model clears it before trading index options on its signal.</p>
         </Card>
       </div>
     </div>

@@ -39,29 +39,29 @@ export default function CandleChart({ data, height = 360 }: { data: P[]; height?
         onMouseLeave={() => setHover(null)}>
         {ticks.map((t, i) => (
           <g key={i}>
-            <line x1={0} x2={W} y1={y(t)} y2={y(t)} stroke="#151a26" />
-            <text x={W - 4} y={y(t) - 3} textAnchor="end" className="num" fontSize={10} fill="#3a4560">{t.toFixed(2)}</text>
+            <line x1={0} x2={W} y1={y(t)} y2={y(t)} stroke="var(--color-ink-800)" />
+            <text x={W - 4} y={y(t) - 3} textAnchor="end" className="num" fontSize={10} fill="var(--color-ink-500)">{t.toFixed(2)}</text>
           </g>
         ))}
         {data.map((d, i) => {
-          const x = i * bw + bw / 2, up = d.c >= d.o, col = up ? "#2ee6a6" : "#ff5c7a";
+          const x = i * bw + bw / 2, up = d.c >= d.o, col = up ? "var(--color-up)" : "var(--color-down)";
           return (
             <g key={d.d}>
-              {d.e === 1 && <rect x={i * bw} y={0} width={bw} height={priceH} fill="#ffb547" opacity={0.08} />}
+              {d.e === 1 && <rect x={i * bw} y={0} width={bw} height={priceH} fill="var(--color-amber)" opacity={0.08} />}
               <line x1={x} x2={x} y1={y(d.h)} y2={y(d.l)} stroke={col} strokeWidth={1} opacity={0.8} />
               <rect x={i * bw + bw * 0.18} width={bw * 0.64} y={y(Math.max(d.o, d.c))}
                 height={Math.max(1, Math.abs(y(d.o) - y(d.c)))} fill={col} opacity={up ? 0.85 : 0.9} rx={0.5} />
               {d.n > 0 && (
                 <rect x={i * bw + bw * 0.15} width={bw * 0.7} y={d.s >= 0 ? sy0 - (d.s / smax) * (sentH / 2) : sy0}
-                  height={Math.max(1, (Math.abs(d.s) / smax) * (sentH / 2))} fill={d.s >= 0 ? "#2ee6a6" : "#ff5c7a"} opacity={0.55} />
+                  height={Math.max(1, (Math.abs(d.s) / smax) * (sentH / 2))} fill={d.s >= 0 ? "var(--color-up)" : "var(--color-down)"} opacity={0.55} />
               )}
-              {d.e === 1 && <circle cx={x} cy={priceH - 6} r={3} fill="#ffb547" />}
+              {d.e === 1 && <circle cx={x} cy={priceH - 6} r={3} fill="var(--color-amber)" />}
             </g>
           );
         })}
-        <line x1={0} x2={W} y1={sy0} y2={sy0} stroke="#283044" />
-        <text x={4} y={priceH + gap - 2} fontSize={10} fill="#5d6a88">overnight news sentiment</text>
-        {hover != null && <line x1={hover * bw + bw / 2} x2={hover * bw + bw / 2} y1={0} y2={height} stroke="#5d6a88" strokeDasharray="3 3" />}
+        <line x1={0} x2={W} y1={sy0} y2={sy0} stroke="var(--color-ink-600)" />
+        <text x={4} y={priceH + gap - 2} fontSize={10} fill="var(--color-ink-400)">overnight news sentiment</text>
+        {hover != null && <line x1={hover * bw + bw / 2} x2={hover * bw + bw / 2} y1={0} y2={height} stroke="var(--color-ink-400)" strokeDasharray="3 3" />}
       </svg>
     </div>
   );

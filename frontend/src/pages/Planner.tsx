@@ -66,16 +66,16 @@ export default function Planner() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[360px_1fr]">
         <Card title="Goal">
           <div className="space-y-5">
-            <Field label="Starting capital" value={usd(start)}><input type="range" min={5000} max={500000} step={5000} value={start} onChange={(e) => setStart(+e.target.value)} className="w-full accent-[#8b7bff]" /></Field>
+            <Field label="Starting capital" value={usd(start)}><input type="range" min={5000} max={500000} step={5000} value={start} onChange={(e) => setStart(+e.target.value)} className="w-full accent-accent" /></Field>
             <Field label="Target" value={usd(target)}>
               <div className="flex flex-wrap gap-1.5">{[100_000, 250_000, 1_000_000, 10_000_000].map((t) => (
-                <button key={t} onClick={() => setTarget(t)} className={clsx("rounded-lg border px-2.5 py-1 text-[12px]", t === target ? "border-accent bg-accent/15 text-ink-100" : "border-ink-700 text-ink-400 hover:text-ink-200")}>{compact(t, "$")}</button>))}</div>
+                <button key={t} onClick={() => setTarget(t)} className={clsx("rounded-lg border px-2.5 py-1 text-[13px]", t === target ? "border-accent bg-accent/15 text-ink-100" : "border-ink-700 text-ink-400 hover:text-ink-200")}>{compact(t, "$")}</button>))}</div>
             </Field>
-            <Field label="Horizon" value={`${days} trading days (${(days / 252).toFixed(1)} yr)`}><input type="range" min={63} max={1260} step={21} value={days} onChange={(e) => setDays(+e.target.value)} className="w-full accent-[#8b7bff]" /></Field>
+            <Field label="Horizon" value={`${days} trading days (${(days / 252).toFixed(1)} yr)`}><input type="range" min={63} max={1260} step={21} value={days} onChange={(e) => setDays(+e.target.value)} className="w-full accent-accent" /></Field>
             <Field label="Strategy returns"><Tabs value={strat} onChange={setStrat} items={[{ v: "stock", label: "Shares" }, { v: "options", label: "Options" }, { v: "straddle", label: "Straddles" }]} /></Field>
             <Field label="Position size multiplier" value={`${scale.toFixed(1)}×`}>
-              <input type="range" min={0.25} max={6} step={0.25} value={scale} onChange={(e) => setScale(+e.target.value)} className="w-full accent-[#8b7bff]" />
-              <div className="mt-1 text-[11px] text-ink-500">1× = backtest sizing. Higher = more leverage on the same edge.</div>
+              <input type="range" min={0.25} max={6} step={0.25} value={scale} onChange={(e) => setScale(+e.target.value)} className="w-full accent-accent" />
+              <div className="mt-1 text-[12.5px] text-ink-500">1× = backtest sizing. Higher = more leverage on the same edge.</div>
             </Field>
           </div>
         </Card>
@@ -87,7 +87,7 @@ export default function Planner() {
             <Stat label="P(reach target)" value={pct(sim.pTarget, 1, false)} sub="at any point in the horizon" valueClass={sim.pTarget > 0.5 ? "text-up" : "text-ink-100"} />
             <Stat label="Years at this edge" value={isFinite(yearsNeeded) ? num(yearsNeeded, 1) : "∞"} sub={`at ${pct(cagr, 0)} CAGR (${scale}× size)`} />
           </div>
-          <Card title="1-year outcome distribution" right={<span className="text-[11px] text-ink-500">3,000 bootstrapped paths · 5-95% and 25-75% bands</span>}>
+          <Card title="1-year outcome distribution" right={<span className="text-[12.5px] text-ink-500">3,000 bootstrapped paths · 5-95% and 25-75% bands</span>}>
             <div className="h-[340px]">
               <ResponsiveContainer>
                 <ComposedChart data={sim.fan} margin={{ left: 8, right: 8, top: 8 }}>
@@ -95,11 +95,11 @@ export default function Planner() {
                   <XAxis dataKey="day" tickLine={false} axisLine={false} tickFormatter={(d) => `d${d}`} />
                   <YAxis scale="log" domain={["auto", "auto"]} tickFormatter={(v) => compact(v, "$")} tickLine={false} axisLine={false} width={60} allowDataOverflow />
                   <Tooltip {...chartTooltip} formatter={(v: number | number[], n: string) => [Array.isArray(v) ? `${usd(v[0])} – ${usd(v[1])}` : usd(v), n]} labelFormatter={(d) => `Day ${d}`} />
-                  <Area dataKey="band" stroke="none" fill="#8b7bff" fillOpacity={0.12} name="5-95%" />
-                  <Area dataKey="iqr" stroke="none" fill="#8b7bff" fillOpacity={0.25} name="25-75%" />
-                  <Line dataKey="p50" stroke="#8b7bff" strokeWidth={2} dot={false} name="median" />
-                  <ReferenceLine y={target} stroke="#ffb547" strokeDasharray="5 5" label={{ value: `target ${compact(target, "$")}`, fill: "#ffb547", fontSize: 11, position: "insideTopLeft" }} />
-                  <ReferenceLine y={start} stroke="#3a4560" strokeDasharray="3 3" />
+                  <Area dataKey="band" stroke="none" fill="var(--color-accent)" fillOpacity={0.12} name="5-95%" />
+                  <Area dataKey="iqr" stroke="none" fill="var(--color-accent)" fillOpacity={0.25} name="25-75%" />
+                  <Line dataKey="p50" stroke="var(--color-accent)" strokeWidth={2} dot={false} name="median" />
+                  <ReferenceLine y={target} stroke="var(--color-amber)" strokeDasharray="5 5" label={{ value: `target ${compact(target, "$")}`, fill: "var(--color-amber)", fontSize: 11, position: "insideTopLeft" }} />
+                  <ReferenceLine y={start} stroke="var(--color-ink-500)" strokeDasharray="3 3" />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>

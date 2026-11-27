@@ -139,6 +139,26 @@ def export_relationships(dsn: str | None = None, dump: str | None = None,
     return df[df["ticker"] != df["other_ticker"]].drop_duplicates(["ticker", "other_ticker", "rel_type"])
 
 
+def _dedupe(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (story, ticker): Sofo World's cluster of syndicated copies, or without a cluster the
+    same headline on the same day. The same headline on another day is another story."""
+    df = df.assign(published_at=pd.to_datetime(df["published_at"], utc=True))
+    same_day = df["headline"].astype(str) + "|" + df["published_at"].dt.strftime("%Y-%m-%d")
+    key = df["cluster_id"].astype(str).where(df["cluster_id"].notna(), same_day) if "cluster_id" in df else same_day
+    return df.assign(_key=key).sort_values("published_at").drop_duplicates(["_key", "ticker"]).drop(columns="_key")
+
+
+def latest(dsn: str, after: str, limit: int = 2000) -> pd.DataFrame:
+    """Articles and events Sofo World first saw after `after` (an ISO timestamp): the incremental read the
+    two-minute loop uses. One small indexed query per cycle; nothing is re-read."""
+    import psycopg  # optional dependency
+
+    sql = NEWS_SQL + "  AND a.first_seen > %(after)s\nORDER BY a.first_seen\nLIMIT %(limit)s"
+    with psycopg.connect(dsn, options="-c default_transaction_read_only=on -c statement_timeout=20000") as conn:
+        df = pd.read_sql(sql, conn, params=dict(since="2000-01-01", min_salience=MIN_SALIENCE, after=after, limit=limit))
+    return df.dropna(subset=["ticker", "published_at", "headline"])
+
+
 def export(dsn: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None = None) -> pd.DataFrame:
     import psycopg  # optional dependency
 
@@ -150,11 +170,7 @@ def export(dsn: str, since: str = "2018-01-01", sec_tickers: pd.DataFrame | None
         m = sec_tickers.drop_duplicates("cik").set_index(sec_tickers["cik"].astype(str))["ticker"]
         df["ticker"] = df["ticker"].fillna(df["cik"].astype(str).map(m))
     df = df.dropna(subset=["ticker", "published_at", "headline"])
-    df["published_at"] = pd.to_datetime(df["published_at"], utc=True)
-    # one row per (story cluster, ticker): syndicated wire copy counts once
-    df["_key"] = df["cluster_id"].astype(str).where(df["cluster_id"].notna(), df["headline"])
-    df = df.sort_values("published_at").drop_duplicates(["_key", "ticker"]).drop(columns="_key")
-    return df
+    return _dedupe(df)
 
 
 def _read_any(uri: str) -> pd.DataFrame:
@@ -232,10 +248,27 @@ def export_from_dump(root: str, since: str = "2018-01-01", sec_tickers: pd.DataF
         m = sec_tickers.drop_duplicates("cik").set_index(sec_tickers.drop_duplicates("cik")["cik"].astype(str))["ticker"]
         df["ticker"] = df["ticker"].fillna(df["cik"].astype(str).map(m))
     df = df.dropna(subset=["ticker", "published_at", "headline"])
-    df["published_at"] = pd.to_datetime(df["published_at"], utc=True)
-    key = df["cluster_id"].astype(str).where(df["cluster_id"].notna(), df["headline"]) if "cluster_id" in df else df["headline"]
-    df = df.assign(_key=key).sort_values("published_at").drop_duplicates(["_key", "ticker"]).drop(columns="_key")
-    return df
+    return _dedupe(df)
+
+
+def publish(out: pd.DataFrame, rel: pd.DataFrame | None = None, via: str = "Sofo World") -> None:
+    """Write the news table the model reads, the headlines the stock pages show, and the competitor graph."""
+    import json
+    keep = ["published_at", "ticker", "headline", "body", "source", "url", "kind"]
+    out = out[[c for c in keep if c in out]]
+    out.to_parquet(DATA_DIR / "sofo_news.parquet", index=False)
+    show = out[out["kind"] == "article"] if "kind" in out else out
+    show = show.assign(id=show["url"].fillna(show["headline"]))[["ticker", "published_at", "headline", "source", "url", "id"]]
+    show.to_parquet(DATA_DIR / "headlines.parquet", index=False)
+    sj = DATA_DIR / "sources.json"
+    note = json.loads(sj.read_text()) if sj.exists() else {}
+    note["news"] = via
+    sj.write_text(json.dumps(note, indent=1))
+    if rel is not None and len(rel):
+        rel.to_parquet(DATA_DIR / "sofo_relationships.parquet", index=False)
+        print(f"relationships: {len(rel):,} links ({rel['rel_type'].value_counts().to_dict()})")
+    print(f"news rows: {len(out):,}  tickers: {out['ticker'].nunique():,}  "
+          f"range: {out['published_at'].min()} -> {out['published_at'].max()}")
 
 
 if __name__ == "__main__":
@@ -253,12 +286,5 @@ if __name__ == "__main__":
         out = export(a.dsn, a.since, sect)
     else:
         raise SystemExit("set SOFO_NEWS_URI (s3://... dump) or SOFO_DATABASE_URL (read-only role)")
-    keep = ["published_at", "ticker", "headline", "body", "source", "url", "kind"]
-    out = out[[c for c in keep if c in out]]
-    out.to_parquet(DATA_DIR / "sofo_news.parquet", index=False)
     rel = export_relationships(a.dsn if not a.dump else None, a.dump, sect)
-    if len(rel):
-        rel.to_parquet(DATA_DIR / "sofo_relationships.parquet", index=False)
-        print(f"relationships: {len(rel):,} links ({rel['rel_type'].value_counts().to_dict()})")
-    print(f"news rows: {len(out):,}  tickers: {out['ticker'].nunique():,}  "
-          f"range: {out['published_at'].min()} -> {out['published_at'].max()}")
+    publish(out, rel)

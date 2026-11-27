@@ -16,6 +16,39 @@ Pages: Morning Brief · **Model Accuracy** (per-stock and index-fund backtests) 
 research holdout, ablation, deflated Sharpe) · Growth Planner · Universe · Long-term · Data & Models.
 Research basis: [docs/RESEARCH.md](docs/RESEARCH.md).
 
+## Keep it live: the daily refresh
+
+```bash
+scripts/daily.sh tracker   # every listed ticker (10,400): prices, SEC filings, headlines, market summary. ~30 min
+scripts/daily.sh scan      # tracker + today's model ideas (needs one earlier `scripts/local.sh real`)
+scripts/daily.sh full      # weekly: refresh SEC bulk files, retrain, rerun the backtest
+```
+
+Run it from cron or launchd every weekday morning on a machine that stays on, and the app updates
+itself. What it adds on top of the model:
+
+* **Every listed ticker** (`sources/alltickers.py`): the SEC's full ticker list with one year of prices.
+* **Every SEC filing, daily** (`sources/filings.py`): EDGAR's daily index, with each filing labelled in
+  plain words (what it is, why it matters, good / bad / worth a look), including what each 8-K is about.
+* **Headlines** (`sources/headlines.py`): per ticker and for the economy, policy and politics. Headline,
+  publisher, time and link only.
+* **Plain-language summaries** (`tracker.py`): a one-line read and a short list for every stock, and a
+  Market page listing what helps the bull case and what the risks are, each with the number behind it.
+  Every sentence comes from a fixed rule on a dated number or filing; nothing is free-written.
+
+**One place scrapes.** Set `SOFO_WORLD_URL` and `SOFO_WORLD_KEY` (a Sofo World service key with the
+`read` scope) and news, events, the competitor graph, financials and filings are pulled from Sofo
+World's `/v1/exports` API, incrementally, on every run (`sources/sofo_api.py`); the scan pulls once
+more just before it runs, so it sees articles up to that minute. `SOFO_DATABASE_URL` or
+`SOFO_NEWS_URI` (database role, S3 dump) work as well (`sources/sofo_world.py`, `sofo_finance.py`).
+The Sofo World side of the API is `infra/sofo-world/*.patch` until it is merged there.
+
+**The scan is for the coming session.** The model scores the first trading day after the last close
+on file, using every article published up to 09:00 ET that morning. Each
+table switches over once Sofo World covers at least 1,500 listed companies and is current; until then
+that table is read from the public source directly and the Today page says which is which. Prices and
+rates are not in Sofo World's catalog yet. The full contract: `docs/SOFO_WORLD_DATA_REQUIREMENTS.md`.
+
 ## Quick start
 
 ```bash

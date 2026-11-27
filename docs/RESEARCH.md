@@ -68,3 +68,103 @@ maps the main findings to what is implemented, with the file where each lives.
 3. Rank stocks against each other and trade a balanced long/short book; do not try to call the market.
 4. Options amplify a directional edge but charge a volatility premium and a spread; use them only when the calibrated expected value clears costs (earnings and large news days).
 5. Judge every result after costs, by year, and against the number of things tried.
+
+## 7. Finding from the first live day (Nov 20, 2026): the book carried a market bet
+
+On the first day recorded live, 4 of 20 calls were on track at midday while the S&P 500 was down
+1.7% from its open. The ten buys had an average 60-day beta of 1.84 and the ten shorts 0.12: equal
+dollars long and short, but not equal market sensitivity. After removing each stock's beta times the
+market move, 7 of 20 were right, so beta explains part of the day, not all of it.
+
+Checked on the 1,723 out-of-sample days of the walk-forward (same model, same predictions; only the
+way stocks are picked changes; top and bottom 25, 3 bps a side, no leverage):
+
+| Selection | Return a year | Sharpe | Worst drawdown | Book beta | Hit rate | Avg day when market < -1% | when > +1% |
+|---|---|---|---|---|---|---|---|
+| Raw score (before) | 2.9% | 0.27 | -44.2% | -0.29 | 51.7% | +56.8 bp | -56.4 bp |
+| Score with beta removed | 2.8% | 0.31 | -35.1% | -0.14 | 51.4% | +25.9 bp | -23.9 bp |
+| Matched inside beta fifths (now) | 2.4% | 0.29 | -34.7% | -0.11 | 51.3% | +19.0 bp | -17.7 bp |
+| Beta fifths, sector-relative score | 1.0% | 0.16 | -35.4% | -0.10 | 51.3% | +15.7 bp | -15.6 bp |
+
+The same three rules through the full simulation (2x gross, drawdown brake, same repaired prices):
+
+| Selection | Total since 2020 | A year | Sharpe | Worst drawdown | Deflated Sharpe | 2026 |
+|---|---|---|---|---|---|---|
+| Raw score (before) | +14.2% | 2.0% | 0.21 | -70.7% | 0.11 | -13.4% |
+| Score with beta removed | +24.1% | 3.2% | 0.25 | -59.4% | 0.13 | +2.5% |
+| Matched inside beta fifths (now) | +27.6% | 3.6% | 0.28 | -57.8% | 0.14 | +14.0% |
+
+What this says:
+
+1. The raw book's market exposure is large and changes sign. On average it leaned against the market
+   (it gained on down days and lost on up days); on Nov 20 it leaned with it. Either way, a day's
+   result was driven more by the market's direction than by stock selection.
+2. Removing beta from the score roughly halves that exposure and cuts the worst drawdown by about nine
+   points, at no cost in return. It does not make the model more accurate: the hit rate stays near
+   51.5%. This is risk control, not new skill.
+3. Adopted: the day's stocks are split into five groups by beta and the strongest and weakest are
+   taken inside each group, so every buy has a short of similar beta (`RiskConfig.beta_neutral`,
+   `backtest.pick_sides`). Removing beta from the score alone balanced the books on average but left
+   a gap of 0.9 on Nov 20 itself; matching bounds it every day (0.91 vs 0.84 on Nov 20). These are the
+   15th and 16th variants tried on this data and are counted in the deflated Sharpe. The Today page
+   states each book's beta before the open.
+4. The proper fix is to train on a beta-adjusted target (the stock's move minus beta times the
+   market's) rather than to neutralise afterwards. That needs a full walk-forward rerun and is the
+   next model experiment.
+5. The headline number is fragile. The raw rule was published at +52% since 2020 a few days earlier;
+   rerun after the SEC listing refresh changed the universe from 2,591 to 2,545 stocks it gives +14%.
+   Daily returns of the two runs correlate 0.99, yet small differences on a third of the days compound
+   to that gap. No single total-return figure from this model should be relied on.
+6. The same day exposed a data fault: a throttled price download had left Nov 9 to 11 with 1,838 of
+   2,545 stocks. Eight of the twenty ideas issued on Nov 20 were built on those gaps. Price merges now
+   add or replace single rows and never delete, an unfinished session is never stored, and the scan
+   reports incomplete prices on the Today page (`alltickers.coverage`).
+
+## 8. Events, speed, and the target (Nov 26, 2026)
+
+**Event history.** `sources/events.py` reads every 8-K since 2015 with the second EDGAR accepted it:
+479,014 filings by 5,999 companies; 28% before the open, 12% during trading, 61% after the close.
+
+**Does reacting fast to an event pay?** (`artifacts/event_study.json`; returns against the market
+over the same interval; 10 bp round trip.)
+
+| Test | Cases | Before costs | After costs | t |
+|---|---|---|---|---|
+| Filed during trading, follow the first move, next hour (hourly bars, 2 years) | 597 | -0.1 bp | -10.1 bp | -0.0 |
+| Same, to the close | 597 | -6.5 bp | -16.5 bp | -1.4 |
+| Filed overnight, follow the opening gap, open to close (2019 to 2026) | 106,089 | +3.4 bp | -6.6 bp | 2.9 |
+| Overnight results, gap up over 5%, next day | 5,354 | +13.2 bp | +3.2 bp | 2.5 |
+
+Following the first reaction to the fact of an event is not profitable in liquid stocks: the move is
+over by the time the filing is public (a press release usually precedes its 8-K by minutes). This
+matches the literature on liquid names. What remains untested is the content of the news, which needs
+an article history with true timestamps (Sofo World).
+
+**Does the model improve with events and a market-adjusted target?** Holdout, trained before 2024,
+tested 2024 to Nov 2026, liquid stocks, 6 bp round trip, top and bottom 25.
+
+| Model | IC vs market-adjusted return | Beta-matched book | Sharpe | Worst drawdown | Hit rate |
+|---|---|---|---|---|---|
+| Before: target = stock minus average stock | 0.0118 (t 2.2) | -1.0 bp a day | -0.26 | -17% | 50.9% |
+| Market-adjusted target | 0.0143 (t 2.8) | -0.4 | -0.13 | -16% | 51.0% |
+| + company events | 0.0118 (t 2.2) | +1.6 | 0.44 | -14% | 51.1% |
+| Both | 0.0155 (t 3.1) | +1.3 | 0.37 | -12% | 51.3% |
+| Both, three models averaged (adopted) | 0.0148 (t 2.9) | +1.9 | 0.55 | -11% | 51.3% |
+
+The gain is small and consistent by year (-0.2, +1.4, +4.8 bp a day in 2024, 2025, 2026). Adopted:
+`ModelConfig.target = "z_b"`, `features.event_features` (k8_*). These are variants 17 to 20 on this
+data; the deflated Sharpe counts them.
+
+**A bug this exposed.** `pipeline.final_model` dropped the target column before training, so the model
+used for the live scan silently trained on the raw open-to-close move while the walk-forward models
+trained on the relative one. Every live scan up to Nov 20 came from a model the backtest never tested.
+Fixed, with an assertion.
+
+**Universe.** The model now covers every exchange-listed operating company trading above $1 with at
+least $1M a day at some point: about 4,600 stocks, up from 2,534. Trading is still limited to the
+liquid set; the rest are scored and graded.
+
+**The two-minute loop** (`stockgpt/intraday.py`) polls the SEC real-time 8-K feed and, when connected,
+Sofo World; stamps each item with a live price; marks it 30 and 60 minutes later and at the close; and
+keeps a scorecard for three rules (follow the move so far, follow the tone, take the scan's side). It is
+a test bench, not a strategy.

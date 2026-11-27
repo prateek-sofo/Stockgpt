@@ -1,0 +1,374 @@
+From 454d32c12cf001475145086f76b0dbb80672d503 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 20 Nov 2026 08:39:42 +0000
+Subject: [PATCH] Exports API: bulk, incremental reads of listed-company news,
+ events, links and SEC rows
+
+/v1/exports/{news,events,relationships,sec}: keyset pages ordered by the time
+Sofo World recorded the row, with a cursor a consumer stores. Read scope.
+Title, snippet and link only; public observations only; companies by ticker
+and CIK. For StockGPT (docs/requests/stockgpt_exports.md).
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01RYp3wyuk1MwcCf773YQ9C6
+---
+ backend/src/sofo_world/serve/app.py           |   4 +
+ backend/src/sofo_world/serve/exports.py       | 173 ++++++++++++++++++
+ backend/tests/integration/test_exports_api.py | 103 +++++++++++
+ docs/requests/stockgpt_exports.md             |  39 ++++
+ 4 files changed, 319 insertions(+)
+ create mode 100644 backend/src/sofo_world/serve/exports.py
+ create mode 100644 backend/tests/integration/test_exports_api.py
+ create mode 100644 docs/requests/stockgpt_exports.md
+
+diff --git a/backend/src/sofo_world/serve/app.py b/backend/src/sofo_world/serve/app.py
+index 78456c2..b686303 100644
+--- a/backend/src/sofo_world/serve/app.py
++++ b/backend/src/sofo_world/serve/app.py
+@@ -130,6 +130,10 @@ from sofo_world.serve import world_model as _world_model  # noqa: E402  per-comp
+ 
+ app.include_router(_world_model.router, dependencies=[Depends(consumer)])
+ 
++from sofo_world.serve import exports as _exports  # noqa: E402  bulk, incremental reads for a product's own copy
++
++app.include_router(_exports.router, dependencies=[Depends(consumer)])
++
+ 
+ BRAIN_TENANT_PREFIX = "bwm:"  # the brain's tenants, managed under one service token
+ 
+diff --git a/backend/src/sofo_world/serve/exports.py b/backend/src/sofo_world/serve/exports.py
+new file mode 100644
+index 0000000..29584e5
+--- /dev/null
++++ b/backend/src/sofo_world/serve/exports.py
+@@ -0,0 +1,173 @@
++"""/v1/exports: bulk, incremental reads for a consuming product that keeps its own copy (StockGPT, the first one:
++it ranks listed stocks each morning and needs every article and event about a listed company, with the time it
++became public, since 2018).
++
++Search (`/v1/news/search`) answers a question; these routes hand over rows. Each page is ordered by the time
++Sofo World recorded the row and its id, and `next` is the cursor for the page after it, so a consumer that stores
++the last cursor it saw receives every later row exactly once, including an article published last week and found
++today. Any key with the `read` scope may call them.
++
++What is served is what the public API already serves: title, snippet (300 characters at most) and link of an
++article, never its text (CLAUDE.md 7.7); public observations only (7.8); companies only, by ticker and CIK, never
++a person."""
++
++from __future__ import annotations
++
++from datetime import UTC, datetime
++from typing import Any
++
++from fastapi import APIRouter, HTTPException, Query
++
++from sofo_world.core import db
++
++router = APIRouter(prefix="/v1/exports", tags=["exports"])
++
++EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
++NIL = "00000000-0000-0000-0000-000000000000"
++REL_TYPES = ["competitor", "customer", "supplier", "partner"]
++
++# One ticker and one CIK per listed company: the strongest identifier of each kind.
++_LISTED = """listed AS (
++  SELECT entity_id,
++         (array_agg(upper(id_value) ORDER BY confidence DESC, last_seen DESC) FILTER (WHERE id_type = 'ticker'))[1] AS ticker,
++         (array_agg(ltrim(id_value, '0') ORDER BY confidence DESC, last_seen DESC) FILTER (WHERE id_type = 'cik'))[1] AS cik
++  FROM entity_identifiers
++  WHERE entity_type = 'company' AND id_type IN ('ticker', 'cik')
++  GROUP BY entity_id)"""
++
++
++def _cursor(after: str | None, since: datetime | None) -> tuple[datetime, str]:
++    """`after` is `<iso time>|<uuid>` as a previous page returned it; without it the read starts at `since`."""
++    if not after:
++        return (since or EPOCH), NIL
++    stamp, _, row_id = after.partition("|")
++    try:
++        return datetime.fromisoformat(stamp), row_id or NIL
++    except ValueError:
++        raise HTTPException(422, "after must be the `next` value of an earlier page") from None
++
++
++def _page(rows: list[dict[str, Any]], limit: int, time_key: str, id_key: str) -> dict[str, Any]:
++    last = rows[-1] if rows else None
++    return {
++        "rows": rows,
++        "count": len(rows),
++        # a full page may have more behind it; a short one is the end for now, and its cursor is where to resume
++        "next": f"{last[time_key].isoformat()}|{last[id_key]}" if last else None,
++        "more": len(rows) == limit,
++    }
++
++
++@router.get("/news")
++async def news(
++    after: str | None = None,
++    since: datetime | None = Query(None, description="first page only: articles Sofo World first saw at or after this"),
++    limit: int = Query(2000, ge=1, le=5000),
++):
++    """Articles that mention at least one listed company, oldest `first_seen` first, each with its listed mentions
++    (ticker, CIK, salience, whether the company is the subject)."""
++    stamp, row_id = _cursor(after, since)
++    rows = await db.fetch(
++        f"""WITH {_LISTED},
++        page AS (
++          SELECT a.article_id, a.first_seen, a.published_at, a.title, a.snippet, a.url,
++                 coalesce(a.publisher_name, a.publisher_domain) AS publisher, a.source_id, a.lang,
++                 a.is_press_release, a.cluster_id, a.event_types
++          FROM news_articles a
++          WHERE (a.first_seen, a.article_id) > (%s::timestamptz, %s::uuid)
++            AND a.published_at IS NOT NULL
++            AND EXISTS (SELECT 1 FROM article_mentions m JOIN listed l ON l.entity_id = m.entity_id
++                        WHERE m.article_id = a.article_id AND m.entity_type = 'company')
++          ORDER BY a.first_seen, a.article_id
++          LIMIT %s)
++        SELECT p.*,
++               (SELECT json_agg(json_build_object('ticker', l.ticker, 'cik', l.cik, 'salience', m.salience,
++                                                  'is_subject', m.is_subject) ORDER BY m.salience DESC)
++                FROM article_mentions m JOIN listed l ON l.entity_id = m.entity_id
++                WHERE m.article_id = p.article_id AND m.entity_type = 'company') AS mentions
++        FROM page p ORDER BY p.first_seen, p.article_id""",
++        stamp,
++        row_id,
++        limit,
++    )
++    return _page(rows, limit, "first_seen", "article_id")
++
++
++@router.get("/events")
++async def events(
++    after: str | None = None,
++    since: datetime | None = Query(None, description="first page only: events detected at or after this"),
++    limit: int = Query(2000, ge=1, le=5000),
++):
++    """Typed events about listed companies, oldest `detected_at` first. `event_date` is when it happened and
++    `detected_at` when Sofo World knew: a consumer must use the later of the two."""
++    stamp, row_id = _cursor(after, since)
++    rows = await db.fetch(
++        f"""WITH {_LISTED}
++        SELECT e.sofo_event_id, e.detected_at, e.event_type, e.event_date, e.title, e.source_id, e.source_url,
++               e.confidence, e.article_id, e.payload, l.ticker, l.cik
++        FROM events e JOIN listed l ON l.entity_id = e.subject_id
++        WHERE e.subject_type = 'company' AND (e.detected_at, e.sofo_event_id) > (%s::timestamptz, %s::uuid)
++        ORDER BY e.detected_at, e.sofo_event_id
++        LIMIT %s""",
++        stamp,
++        row_id,
++        limit,
++    )
++    return _page(rows, limit, "detected_at", "sofo_event_id")
++
++
++@router.get("/relationships")
++async def relationships(
++    after: str | None = None,
++    since: datetime | None = Query(None, description="first page only: links first seen at or after this"),
++    limit: int = Query(5000, ge=1, le=5000),
++):
++    """Competitor, customer, supplier and partner links where both companies are listed. `first_seen` is when the
++    link was first recorded: it must not be applied to an earlier date."""
++    stamp, row_id = _cursor(after, since)
++    rows = await db.fetch(
++        f"""WITH {_LISTED}
++        SELECT r.sofo_rel_id, r.first_seen, r.last_seen, r.valid_to, r.rel_type, r.confidence, r.source_id,
++               a.ticker, a.cik, b.ticker AS other_ticker, b.cik AS other_cik
++        FROM relationships r
++        JOIN listed a ON a.entity_id = r.from_id
++        JOIN listed b ON b.entity_id = r.to_id
++        WHERE r.from_type = 'company' AND r.to_type = 'company' AND r.rel_type = ANY(%s)
++          AND (r.first_seen, r.sofo_rel_id) > (%s::timestamptz, %s::uuid)
++        ORDER BY r.first_seen, r.sofo_rel_id
++        LIMIT %s""",
++        REL_TYPES,
++        stamp,
++        row_id,
++        limit,
++    )
++    return _page(rows, limit, "first_seen", "sofo_rel_id")
++
++
++@router.get("/sec")
++async def sec(
++    after: str | None = None,
++    since: datetime | None = Query(None, description="first page only: observations recorded at or after this"),
++    limit: int = Query(5000, ge=1, le=5000),
++):
++    """What the SEC crawlers recorded, public rows only: XBRL metric points (FN01, `metric.<name>`, with the
++    filing date in `published_at`) and filing records (form, filed, accession, 8-K items)."""
++    stamp, row_id = _cursor(after, since)
++    rows = await db.fetch(
++        """SELECT o.observation_id, o.recorded_at, o.field, o.value, o.published_at, o.source_id,
++                  coalesce(o.entity_ref->>'cik',
++                           (SELECT ltrim(i.id_value, '0') FROM entity_identifiers i
++                            WHERE i.entity_id = o.entity_id AND i.entity_type = 'company' AND i.id_type = 'cik'
++                            ORDER BY i.confidence DESC LIMIT 1)) AS cik
++        FROM observations o
++        WHERE o.entity_type = 'company' AND o.license_scope = 'public'
++          AND ((o.field LIKE 'metric.%%' AND o.source_id = 'FN01') OR o.field = 'filing')
++          AND (o.recorded_at, o.observation_id) > (%s::timestamptz, %s::uuid)
++        ORDER BY o.recorded_at, o.observation_id
++        LIMIT %s""",
++        stamp,
++        row_id,
++        limit,
++    )
++    return _page(rows, limit, "recorded_at", "observation_id")
+diff --git a/backend/tests/integration/test_exports_api.py b/backend/tests/integration/test_exports_api.py
+new file mode 100644
+index 0000000..5a5583f
+--- /dev/null
++++ b/backend/tests/integration/test_exports_api.py
+@@ -0,0 +1,103 @@
++"""/v1/exports against Postgres: a consuming product pulls articles, events, links and SEC rows about listed
++companies page by page, resumes from the cursor it was given, and never receives a company without a ticker or CIK,
++a vendor row, or an article's text."""
++
++from __future__ import annotations
++
++from datetime import UTC, datetime, timedelta
++
++import httpx
++import pytest
++
++H = {"Authorization": "Bearer dev-token"}
++T0 = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
++
++
++@pytest.fixture
++async def client():
++    from sofo_world.serve.app import app
++
++    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
++        yield c
++
++
++async def _seed() -> dict:
++    from sofo_world.core import db
++    from sofo_world.core.ids import uuid7
++
++    acme, beta, private = uuid7(), uuid7(), uuid7()
++    arts = [uuid7() for _ in range(4)]
++    async with db.tx() as c:
++        for eid, id_type, value in ((acme, "ticker", "acme"), (acme, "cik", "0000000042"), (beta, "ticker", "beta"),
++                                    (private, "domain", "private.example")):  # fmt: skip
++            await c.execute(
++                """INSERT INTO entity_identifiers (entity_type, entity_id, id_type, id_value, is_strong, source_id, confidence)
++                   VALUES ('company', %s, %s, %s, false, 'ID04', 0.9)""",
++                (eid, id_type, value),
++            )
++        for i, a in enumerate(arts):
++            await c.execute(
++                """INSERT INTO news_articles (article_id, url, title, snippet, published_at, first_seen, publisher_domain, source_id)
++                   VALUES (%s, %s, %s, 'a short snippet', %s, %s, 'wire.example', 'NW02')""",
++                (a, f"https://wire.example/{a}", f"Story {i}", T0 + timedelta(days=i), T0 + timedelta(days=i, minutes=5)),
++            )
++        for a, eid, sal, subj in ((arts[0], acme, 0.9, True), (arts[0], beta, 0.4, False), (arts[1], private, 0.9, True),
++                                  (arts[2], beta, 0.8, True), (arts[3], acme, 0.7, True)):  # fmt: skip
++            await c.execute(
++                """INSERT INTO article_mentions (article_id, entity_type, entity_id, mention, salience, is_subject, method, confidence)
++                   VALUES (%s, 'company', %s, 'x', %s, %s, 'gazetteer', 0.9)""",
++                (a, eid, sal, subj),
++            )
++        await c.execute(
++            """INSERT INTO events (sofo_event_id, event_type, subject_type, subject_id, event_date, detected_at, title,
++                                   source_id, source_url, confidence, dedupe_key)
++               VALUES (%s, 'earnings_release', 'company', %s, %s, %s, '8-K item 2.02', 'FN03', 'https://sec.example', 0.99, %s)""",
++            (uuid7(), acme, T0.date(), T0 + timedelta(hours=9), f"t:{acme}"),
++        )
++        await c.execute(
++            """INSERT INTO relationships (sofo_rel_id, from_type, from_id, to_type, to_id, rel_type, confidence, source_id)
++               VALUES (%s, 'company', %s, 'company', %s, 'competitor', 0.8, 'MK01'),
++                      (%s, 'company', %s, 'company', %s, 'competitor', 0.8, 'MK01')""",
++            (uuid7(), acme, beta, uuid7(), acme, private),
++        )
++    return {"arts": arts}
++
++
++async def test_news_pages_resume_from_the_cursor_and_hold_listed_companies_only(client):
++    await _seed()
++    since = (T0 - timedelta(days=1)).isoformat()
++    p1 = (await client.get("/v1/exports/news", params={"since": since, "limit": 2}, headers=H)).json()
++    assert [r["title"] for r in p1["rows"]] == ["Story 0", "Story 2"] and p1["more"]  # Story 1 is about a private company
++    first = p1["rows"][0]
++    assert [(m["ticker"], m["cik"], m["is_subject"]) for m in first["mentions"]] == [("ACME", "42", True), ("BETA", None, False)]
++    assert "body" not in first and len(first["snippet"]) <= 300  # title, snippet and link only (7.7)
++    p2 = (await client.get("/v1/exports/news", params={"after": p1["next"], "limit": 2}, headers=H)).json()
++    assert [r["title"] for r in p2["rows"]] == ["Story 3"] and not p2["more"]
++    p3 = (await client.get("/v1/exports/news", params={"after": p2["next"]}, headers=H)).json()
++    assert p3["rows"] == [] and p3["next"] is None  # nothing new: the consumer keeps its cursor
++    assert (await client.get("/v1/exports/news", params={"after": "not-a-cursor"}, headers=H)).status_code == 422
++    assert (await client.get("/v1/exports/news")).status_code == 401
++
++
++async def test_events_links_and_sec_rows(client):
++    from sofo_world.core import db
++    from sofo_world.core.ids import uuid7
++
++    await _seed()
++    ev = (await client.get("/v1/exports/events", headers=H)).json()["rows"]
++    assert [(e["ticker"], e["cik"], e["event_type"]) for e in ev if e["title"] == "8-K item 2.02"] == [("ACME", "42", "earnings_release")]
++    rel = (await client.get("/v1/exports/relationships", headers=H)).json()["rows"]
++    assert {(r["ticker"], r["other_ticker"]) for r in rel} >= {("ACME", "BETA")}
++    assert all(r["other_ticker"] or r["other_cik"] for r in rel)  # the link to the private company is not served
++
++    now = datetime.now(UTC)
++    for scope, value in (("public", 1), ("vendor", 9)):
++        await db.execute(
++            """INSERT INTO observations (observation_id, entity_type, entity_ref, field, value, source_id, fetched_at,
++                                         published_at, extractor, extractor_version, confidence, license_scope, legal_tier, content_hash)
++               VALUES (%s, 'company', '{"cik": "0000000042"}', 'metric.revenue', %s, 'FN01', %s, %s, 'sec', '1', 0.98, %s, 'A', %s)""",
++            uuid7(), f'{{"value": {value}}}', now, T0, scope, f"exports-{scope}",
++        )  # fmt: skip
++    sec = (await client.get("/v1/exports/sec", params={"since": (now - timedelta(minutes=5)).isoformat()}, headers=H)).json()["rows"]
++    mine = [r for r in sec if r["cik"] == "0000000042" and r["field"] == "metric.revenue"]
++    assert [r["value"] for r in mine] == [{"value": 1}]  # the vendor row is never served (7.8)
+diff --git a/docs/requests/stockgpt_exports.md b/docs/requests/stockgpt_exports.md
+new file mode 100644
+index 0000000..329cf40
+--- /dev/null
++++ b/docs/requests/stockgpt_exports.md
+@@ -0,0 +1,39 @@
++# Request: serve /v1/exports to StockGPT
++
++**From:** StockGPT (`prateek-sofo/stockgpt`). **Owner ruling (2026-11-19):** Sofo World is the one place that scrapes;
++StockGPT reads news, events, the competitor graph, financials and filings from it.
++
++## What this branch adds
++
++`backend/src/sofo_world/serve/exports.py`: four read-only routes under `/v1/exports` (`news`, `events`,
++`relationships`, `sec`), each a keyset page ordered by the time Sofo World recorded the row, with a `next` cursor.
++A consumer that stores the cursor receives every later row once. Any service key with the `read` scope may call
++them. Served: title, snippet and link of an article (7.7), public observations only (7.8), companies by ticker and
++CIK only. Test: `backend/tests/integration/test_exports_api.py`.
++
++## What it takes to turn it on
++
++1. Merge and deploy the API where it reads the live database (cc-1 on db-1: `infra/cc-aws/deploy.sh api`).
++2. Make `/v1/exports/` reachable for a machine with a key. Today the public site lets only signed-in browsers
++   through, to `/admin/` only:
++   - `infra/cc-aws/api.yaml`, nginx: add a `location /v1/exports/` that proxies to the API and keeps the
++     `Authorization` header (the `/admin/` block blanks it), and move the `x-sofo-email` check into the `/admin/`
++     block so it does not apply to this one. Keep the origin-secret check for both.
++   - `infra/cc-aws/edge/handler.mjs`: for a path that starts with `/v1/exports/`, skip the Cognito sign-in and pass
++     the request to the origin only when it carries `Authorization: Bearer sk_world_...`; otherwise answer 401. The
++     API still verifies the key against `service_keys`, so the edge check is only a first filter. Add the case to
++     `handler.test.mjs`.
++   - CloudFront already forwards the header (`AllViewerExceptHostHeader`).
++3. Mint a key: Command Center, Settings, API keys: consumer `stockgpt`, scope `read`. The answer shows
++   `SOFO_WORLD_URL` and `SOFO_WORLD_KEY` once.
++4. StockGPT side: `SOFO_WORLD_URL=... SOFO_WORLD_KEY=... python -m stockgpt.sources.sofo_api` (or `scripts/daily.sh`,
++   which calls it when both are set).
++
++An index on `news_articles (first_seen, article_id)` and on `observations (recorded_at, observation_id)` keeps the
++pages fast once the tables are large; `events (detected_at, sofo_event_id)` likewise. Not added here: a migration on
++the live tables is the owner's call.
++
++## Not verified here
++
++The route's SQL was run against a local Postgres 16 with the same column shapes, not against this repository's test
++database or the live one. `make test` and `make lint` have not been run on this branch.
+-- 
+2.43.0
+

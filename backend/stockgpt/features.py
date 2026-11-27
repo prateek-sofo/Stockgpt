@@ -69,6 +69,36 @@ def news_features(news_scored: pd.DataFrame, dates: pd.DatetimeIndex) -> pd.Data
     return f
 
 
+K8 = {"results": ["2.02"], "update": ["7.01"], "other": ["8.01"], "exec": ["5.02"], "agreement": ["1.01", "2.01"],
+      "bad": ["4.02", "2.06", "3.01", "2.05", "1.03", "2.04"], "capital": ["3.02", "2.03"]}
+
+
+def event_features(index: pd.MultiIndex) -> pd.DataFrame | None:
+    """Company events from SEC 8-K filings (sources/events.py), per (date, ticker): which kinds became
+    public since the last close and before the 09:00 scan, how many in the past 5 and 20 sessions,
+    and sessions since the last one. A filing accepted at or after 09:00 belongs to the next scan."""
+    path = DATA_DIR / "events.parquet"
+    if not path.exists():
+        return None
+    ev = pd.read_parquet(path)
+    ev = ev[ev["form"].isin(["8-K", "8-K/A"])]
+    local = ev["accepted"].dt.tz_convert(ET)
+    ev = ev[(ev["session"] == "post") | ((ev["session"] == "pre") & (local.dt.hour < 9))]
+    out = pd.DataFrame(index=index)
+    codes = ev["items"].str.split(",")
+    for k, want in K8.items():
+        hit = ev[codes.apply(lambda c: any(x in c for x in want))]
+        out[f"k8_{k}"] = index.isin(pd.MultiIndex.from_frame(hit[["date", "ticker"]].drop_duplicates())).astype(np.float32)
+    cnt = ev.groupby(["date", "ticker"]).size()
+    out["k8_any"] = cnt.reindex(index).fillna(0).clip(0, 3).astype(np.float32).values
+    wide = out["k8_any"].gt(0).astype(np.float32).unstack("ticker").fillna(0)
+    pos = pd.DataFrame(np.broadcast_to(np.arange(len(wide), dtype=np.float32)[:, None], wide.shape), index=wide.index, columns=wide.columns)
+    since = (pos - pos.where(wide > 0).ffill().shift(1)).clip(upper=60)
+    for name, w in (("k8_n5", wide.rolling(5, min_periods=1).sum().shift(1)), ("k8_n20", wide.rolling(20, min_periods=1).sum().shift(1)), ("k8_since", since)):
+        out[name] = w.stack(future_stack=True).reindex(index).astype(np.float32).values
+    return out
+
+
 def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     prices = tables["prices"].sort_values(["date", "ticker"])
     dates = pd.DatetimeIndex(sorted(prices["date"].unique()), name="date")
@@ -166,7 +196,7 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     feats["event_premium"] = ivw_prev / iv          # >1 = event priced into the front week
     feats["atm_spread"] = spread
 
-    panel = pd.concat({k: df.stack(future_stack=True).astype(np.float32) for k, df in feats.items()}, axis=1)
+    panel = pd.concat({k: df.astype(np.float32).stack(future_stack=True) for k, df in feats.items()}, axis=1)
     panel.index.names = ["date", "ticker"]
     del feats
 
@@ -279,6 +309,19 @@ def build_panel(tables: dict, scorer=None) -> pd.DataFrame:
     panel["z_oc"] = (panel["r_oc"] / panel["sig_d"]).clip(-6, 6)
     # stock-relative target: the day's cross-sectional average removed (what a market-neutral book earns)
     panel["z_x"] = panel["z_oc"] - panel.groupby(level="date")["z_oc"].transform("mean")
+    # market-adjusted target: the stock's move minus its beta times the market's move. Against z_x, a
+    # high-beta stock no longer "beats the market" just because the market rose, so the model is
+    # trained on what is specific to the stock (docs/RESEARCH.md 8: holdout IC against the adjusted
+    # return 0.0118 -> 0.0148, beta-matched book -1.0 -> +1.9 bp a day).
+    from .universe import liquid_mask
+    liq = liquid_mask(panel).values
+    mkt_oc = panel.loc[liq, "r_oc"].groupby(level="date").mean()
+    beta_raw = panel["beta_60"].astype(np.float32).clip(-1, 4).fillna(1.0)
+    panel["resid_oc"] = (panel["r_oc"] - beta_raw * panel.index.get_level_values("date").map(mkt_oc).values).astype(np.float32)
+    panel["z_b"] = (panel["resid_oc"] / panel["sig_d"]).clip(-6, 6).astype(np.float32)
+    ev = event_features(panel.index)
+    if ev is not None:
+        panel = pd.concat([panel, ev], axis=1)
     # 5-session horizon (open t -> close t+4), in vol units, market-relative. Longer holds cut trading costs.
     z5 = (panel["r_fwd5"] / (panel["sig_d"] * np.sqrt(5))).clip(-6, 6)
     panel["z5_x"] = z5 - z5.groupby(level="date").transform("mean")
@@ -358,7 +401,7 @@ def add_ticker_traits(panel: pd.DataFrame) -> pd.DataFrame:
 
 
 TARGET_COLS = {"r_oc", "r_cc", "r_gap", "r_fwd5", "r_fwd20", "open_px", "close_px", "prev_close",
-               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc", "z_x", "z5_x"}
+               "high_px", "low_px", "y_dir", "sig_d", "ivw_t", "z_oc", "z_x", "z5_x", "z_b", "resid_oc"}
 
 # Interpretable linear core. tx_* terms carry each ticker's own sensitivities.
 LINEAR_FEATURES = ["peer_ind_news", "peer_comp_news", "peer_corr_news", "peer_ind_earn_surp", "peer_comp_earn_surp", "peer_corr_earn_surp", "peer_ind_earn_react", "supply_news", "tx_peer_ind_earn_surp", "news_on_wsent", "sent_gap_divergence", "gap_pre_z", "ret_1d_z", "eps_surprise", "ev_earnings", "ev_guidance", "ev_analyst", "news_prior_wsent", "news_5d_wsent", "tx_news_on_wsent", "tx_gap_pre_z", "tx_ret_1d_z", "tx_eps_surprise", "mkt_gap", "sector_gap_rel"]

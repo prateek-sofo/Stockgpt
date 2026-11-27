@@ -2,18 +2,34 @@ import clsx from "clsx";
 import type { ReactNode } from "react";
 import { pct, tone } from "../lib/format";
 
+/** A section of a page. By default it is a heading over a hairline with its content below, no box:
+ *  on a white page the rule is enough. `pad={false}` is for a table or list that is one object and
+ *  scrolls on its own; that one gets a surface. */
 export function Card({ children, className, title, right, pad = true }: {
   children: ReactNode; className?: string; title?: ReactNode; right?: ReactNode; pad?: boolean;
 }) {
+  if (!pad) {
+    return (
+      <section className={clsx("card fade-in overflow-hidden", className)}>
+        {(title || right) && (
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 px-5 py-2.5">
+            <h3 className="t-head">{title}</h3>
+            {right}
+          </header>
+        )}
+        {children}
+      </section>
+    );
+  }
   return (
-    <section className={clsx("card fade-in", className)}>
+    <section className={clsx("fade-in", className)}>
       {(title || right) && (
-        <header className="flex items-center justify-between gap-3 px-5 pt-4 pb-2">
-          <h3 className="text-[13px] font-semibold text-ink-200 tracking-tight">{title}</h3>
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-ink-700 pb-2">
+          <h3 className="t-head">{title}</h3>
           {right}
         </header>
       )}
-      <div className={clsx(pad && "px-5 pb-5", !title && !right && pad && "pt-5")}>{children}</div>
+      {children}
     </section>
   );
 }
@@ -22,22 +38,22 @@ export function Stat({ label, value, sub, valueClass, hint }: {
   label: string; value: ReactNode; sub?: ReactNode; valueClass?: string; hint?: string;
 }) {
   return (
-    <div className="card px-4 py-3.5 fade-in" title={hint}>
-      <div className="label">{label}</div>
-      <div className={clsx("num mt-1.5 text-[22px] font-semibold leading-none tracking-tight", valueClass)}>{value}</div>
-      {sub && <div className="mt-1.5 text-[11.5px] text-ink-400">{sub}</div>}
+    <div className="border-t border-ink-700 pt-3 fade-in" title={hint}>
+      <div className="t-label">{label}</div>
+      <div className={clsx("mt-1.5 font-[family-name:var(--font-display)] text-[22px] font-semibold leading-none tracking-tight text-ink-100 [font-variant-numeric:tabular-nums]", valueClass)}>{value}</div>
+      {sub && <div className="t-small mt-1.5">{sub}</div>}
     </div>
   );
 }
 
 export function Pill({ children, color = "ink", className }: { children: ReactNode; color?: "up" | "down" | "amber" | "accent" | "sky" | "ink"; className?: string }) {
   const c = {
-    up: "bg-up/12 text-up ring-1 ring-up/25",
-    down: "bg-down/12 text-down ring-1 ring-down/25",
-    amber: "bg-amber/12 text-amber ring-1 ring-amber/25",
-    accent: "bg-accent/14 text-accent ring-1 ring-accent/30",
-    sky: "bg-sky/12 text-sky ring-1 ring-sky/25",
-    ink: "bg-ink-700/60 text-ink-200 ring-1 ring-ink-600",
+    up: "bg-up/10 text-up",
+    down: "bg-down/10 text-down",
+    amber: "bg-ink-850 text-ink-200 before:mr-0.5 before:inline-block before:h-1.5 before:w-1.5 before:rounded-full before:bg-amber before:content-['']",
+    accent: "bg-wash text-accent",
+    sky: "bg-sky/10 text-sky",
+    ink: "bg-ink-850 text-ink-300",
   }[color];
   return <span className={clsx("chip", c, className)}>{children}</span>;
 }
@@ -48,7 +64,7 @@ export function Delta({ v, d = 1, className }: { v: number | null | undefined; d
 
 export function SentDot({ s }: { s: number }) {
   const c = s > 0.2 ? "bg-up" : s < -0.2 ? "bg-down" : "bg-ink-400";
-  const glow = Math.abs(s) > 0.6 ? (s > 0 ? "shadow-[0_0_10px_#2ee6a6]" : "shadow-[0_0_10px_#ff5c7a]") : "";
+  const glow = "";
   return <span className={clsx("inline-block h-2 w-2 shrink-0 rounded-full", c, glow)} />;
 }
 
@@ -57,13 +73,13 @@ export function ProbRing({ p, dir, size = 64 }: { p: number; dir: "UP" | "DOWN";
   const C = 2 * Math.PI * r;
   // map 50%..65% onto the ring: edges in this business are small
   const frac = Math.max(0.02, Math.min(1, (p - 0.5) / 0.15));
-  const col = dir === "UP" ? "#2ee6a6" : "#ff5c7a";
+  const col = dir === "UP" ? "var(--color-up)" : "var(--color-down)";
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="#1c2130" strokeWidth={5} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="var(--color-ink-700)" strokeWidth={5} fill="none" />
         <circle cx={size / 2} cy={size / 2} r={r} stroke={col} strokeWidth={5} fill="none" strokeLinecap="round"
-          strokeDasharray={`${C * frac} ${C}`} style={{ filter: `drop-shadow(0 0 6px ${col}66)` }} />
+          strokeDasharray={`${C * frac} ${C}`} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="num text-[13px] font-semibold">{(p * 100).toFixed(1)}</span>
@@ -77,7 +93,7 @@ export function Spark({ data, w = 96, h = 28, color }: { data: number[]; w?: num
   if (!data?.length) return null;
   const lo = Math.min(...data), hi = Math.max(...data);
   const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - lo) / (hi - lo || 1)) * (h - 2) - 1}`).join(" ");
-  const c = color ?? (data[data.length - 1] >= data[0] ? "#2ee6a6" : "#ff5c7a");
+  const c = color ?? (data[data.length - 1] >= data[0] ? "var(--color-up)" : "var(--color-down)");
   return (
     <svg width={w} height={h} className="overflow-visible">
       <polyline points={pts} fill="none" stroke={c} strokeWidth={1.4} strokeLinejoin="round" />
@@ -85,7 +101,7 @@ export function Spark({ data, w = 96, h = 28, color }: { data: number[]; w?: num
   );
 }
 
-export function Bar({ v, max, pos = "#2ee6a6", neg = "#ff5c7a" }: { v: number; max: number; pos?: string; neg?: string }) {
+export function Bar({ v, max, pos = "var(--color-up)", neg = "var(--color-down)" }: { v: number; max: number; pos?: string; neg?: string }) {
   const w = Math.min(50, (Math.abs(v) / (max || 1)) * 50);
   return (
     <div className="relative h-1.5 w-full rounded-full bg-ink-700/70">
@@ -118,12 +134,14 @@ export function ErrorBox({ error }: { error: string }) {
   );
 }
 
+/** The first thing to read on a screen: one sentence in the display size, and under it the
+ *  quieter line that qualifies it. */
 export function PageHeader({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-[26px] font-semibold tracking-tight text-ink-100">{title}</h1>
-        {sub && <p className="mt-1 text-[13.5px] text-ink-400">{sub}</p>}
+      <div className="min-w-0">
+        <h1 className="t-display">{title}</h1>
+        {sub && <div className="t-body mt-1.5 max-w-[78ch] text-ink-400">{sub}</div>}
       </div>
       {right}
     </div>
@@ -132,11 +150,11 @@ export function PageHeader({ title, sub, right }: { title: ReactNode; sub?: Reac
 
 export function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { v: T; label: ReactNode }[] }) {
   return (
-    <div className="inline-flex rounded-xl border border-ink-700 bg-ink-900 p-1">
+    <div className="inline-flex rounded-[6px] border border-ink-700 bg-ink-900 p-0.5">
       {items.map((it) => (
         <button key={it.v} onClick={() => onChange(it.v)}
-          className={clsx("rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition",
-            value === it.v ? "bg-ink-700 text-ink-100 shadow" : "text-ink-400 hover:text-ink-200")}>
+          className={clsx("rounded-[4px] px-2.5 py-1 text-[12.5px] font-medium transition-colors",
+            value === it.v ? "bg-ink-850 text-ink-100" : "text-ink-400 hover:text-ink-100")}>
           {it.label}
         </button>
       ))}
@@ -145,8 +163,20 @@ export function Tabs<T extends string>({ value, onChange, items }: { value: T; o
 }
 
 export const chartTooltip = {
-  contentStyle: { background: "#0f121a", border: "1px solid #283044", borderRadius: 12, fontSize: 12, boxShadow: "0 10px 30px rgba(0,0,0,.5)" },
-  labelStyle: { color: "#8a96b3", marginBottom: 4 },
+  contentStyle: { background: "var(--color-ink-900)", border: "1px solid var(--color-ink-600)", borderRadius: 6, fontSize: 12, boxShadow: "0 14px 34px -22px rgba(14,17,22,.35)" },
+  labelStyle: { color: "var(--color-ink-300)", marginBottom: 4 },
   itemStyle: { padding: 0 },
-  cursor: { stroke: "#3a4560", strokeDasharray: "3 3" },
+  cursor: { stroke: "var(--color-ink-500)", strokeDasharray: "3 3" },
 };
+
+const TONE: Record<string, { dot: string; label: string; pill: "up" | "down" | "amber" | "ink" }> = {
+  good: { dot: "bg-up", label: "Usually good", pill: "up" }, bad: { dot: "bg-down", label: "Usually bad", pill: "down" },
+  watch: { dot: "bg-amber", label: "Worth a look", pill: "amber" }, info: { dot: "bg-ink-400", label: "Routine", pill: "ink" },
+};
+export function ToneDot({ t }: { t: string }) {
+  return <span className={clsx("mt-[7px] inline-block h-2 w-2 shrink-0 rounded-full", (TONE[t] ?? TONE.info).dot)} />;
+}
+export function TonePill({ t }: { t: string }) {
+  const x = TONE[t] ?? TONE.info;
+  return <Pill color={x.pill}>{x.label}</Pill>;
+}

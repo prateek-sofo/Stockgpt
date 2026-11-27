@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from datetime import datetime, timezone
 
@@ -18,7 +19,7 @@ from . import longterm
 from .accuracy import per_ticker as accuracy_per_ticker, summary as accuracy_summary
 from .backtest import (deflated_sharpe, build_signals, calibration, deciles, information_coefficient, monte_carlo,
                        monthly_returns, simulate, stats, walk_forward)
-from .config import ARTIFACT_DIR, SETTINGS
+from .config import ARTIFACT_DIR, DATA_DIR, SETTINGS
 from .data.loader import load_all
 from .features import ET, TRAITS, _assign_sessions, build_panel, feature_columns, score_news
 from .models.ticker_model import HierarchicalModel
@@ -80,9 +81,114 @@ def data_notes(panel, tables, source) -> list[dict]:
     return notes
 
 
+def data_used(tables: dict, scan_date) -> list[dict]:
+    """Every input behind a scan, with the dates it covers. Shown on the Today page."""
+    scan = pd.Timestamp(scan_date)
+    out = []
+    def row(name, what, through, status="ok", note=""):
+        out.append(dict(source=name, what=what, through=str(pd.Timestamp(through).date()) if through is not None and pd.notna(through) else None,
+                        status=status, note=note))
+    from .config import DATA_DIR
+    import json as _json
+    sj = DATA_DIR / "sources.json"
+    src = _json.loads(sj.read_text()) if sj.exists() else {}
+    sofo = lambda k, direct: f"Sofo World ({direct})" if src.get(k) == "Sofo World" else f"{direct}, read directly until Sofo World supplies it"
+    px = tables["prices"]
+    known = px[px["date"] < scan]["date"].max() if len(px) else None
+    from .sources.alltickers import coverage
+    cov = coverage(px[px["date"] < scan]) if len(px) else dict(ok=True, note="")
+    row("Daily prices", "Yahoo Finance, split- and dividend-adjusted", known, "ok" if cov["ok"] else "partial",
+        f"last close before the scan; {cov['note']}")
+    has_pre = "premarket" in px and px.loc[px["date"] == scan, "premarket"].notna().any()
+    row("Premarket prices", "Yahoo Finance, last trade before 09:00 ET", scan if has_pre else None,
+        "ok" if has_pre else "missing", "" if has_pre else "not loaded: opening gaps are not used")
+    news = tables.get("news")
+    if news is not None and len(news):
+        ts = pd.to_datetime(news["published_at"], utc=True).dt.tz_convert(ET)
+        cutoff = (scan + pd.Timedelta(hours=9)).tz_localize(ET)
+        seen = ts[ts < cutoff]
+        start = (known + pd.Timedelta(hours=16)).tz_localize(ET) if known is not None else cutoff - pd.Timedelta(days=1)
+        n_window = int(((ts >= start) & (ts < cutoff)).sum())
+        row("Company news", "Sofo World articles and events", seen.max() if len(seen) else None, "ok" if n_window else "stale",
+            f"{n_window:,} articles between {start:%a %b %d %H:%M} and {cutoff:%a %b %d %H:%M} ET; "
+            f"latest {seen.max():%b %d %H:%M} ET; history from {ts.min():%Y-%m-%d}" if len(seen) else "no articles before the scan")
+    else:
+        row("Company news", "Sofo World articles and events", None, "missing", "not connected: no news was used for these ideas")
+    hp, fp = DATA_DIR / "headlines.parquet", DATA_DIR / "filings.parquet"
+    if hp.exists():
+        h = pd.read_parquet(hp, columns=["ticker", "published_at"])
+        h = h[~h["ticker"].str.startswith("_")]
+        row("News headlines", "Sofo World articles" if src.get("news") == "Sofo World" else "Yahoo Finance headlines, read directly until Sofo World supplies them", h["published_at"].max().tz_convert(ET).tz_localize(None), "context",
+            f"{h['ticker'].nunique():,} stocks; " + ("the same articles, shown and summarised on each stock page" if src.get("news") == "Sofo World"
+                                                    else "shown and summarised on each stock page, not used to rank (the model has no headline history to learn from yet)"))
+    if fp.exists():
+        fl = pd.read_parquet(fp, columns=["ticker", "date"])
+        last = fl["date"].max()
+        row("SEC filings", sofo("filings", "EDGAR filings by listed companies"), last, "context",
+            f"{int((fl['date'] == last).sum()):,} filings on the latest day; shown on Market and stock pages. Earnings filings feed the model through the earnings dates below")
+    e = tables.get("earnings")
+    if e is not None and len(e):
+        past = e[pd.to_datetime(e["report_date"]) <= scan]
+        row("Earnings dates", sofo("earnings", "SEC 8-K item 2.02"), past["report_date"].max() if len(past) else None)
+    f = tables.get("fundamentals")
+    if f is not None and len(f):
+        row("Company financials", sofo("financials", "SEC quarterly filings, dated by filing day"), f[pd.to_datetime(f["report_date"]) < scan]["report_date"].max())
+    op = tables.get("options")
+    if op is not None and len(op):
+        row("Option prices", "recorded daily snapshots", op[pd.to_datetime(op["date"]) < scan]["date"].max(), "partial",
+            "real where recorded, estimated elsewhere")
+    else:
+        row("Option prices", "implied volatility", None, "estimated", "estimated from recent price swings; no option price history")
+    mp = DATA_DIR / "macro_raw.parquet"
+    if mp.exists():
+        m = pd.read_parquet(mp).dropna(how="all")
+        row("Rates, volatility, political risk", "FRED, policy-uncertainty and geopolitical-risk indexes",
+            m[m.index < scan].index.max(), "context", "shown as context; not used to rank stocks")
+    rel = DATA_DIR / "sofo_relationships.parquet"
+    row("Competitor links", "Sofo World competitor / customer / supplier graph" if rel.exists() else "SEC industry codes and price co-movement",
+        known, "ok" if rel.exists() else "partial", "" if rel.exists() else "Sofo World graph not connected: using industry and co-movement peers")
+    return out
+
+
+def score_all(model, core: set[str], days: int = 760) -> dict:
+    """The trained model's view of every listed stock that trades, not only the ones it is tested on.
+    Builds the same features over a recent window for the wide universe, scores the session being
+    scanned, and ranks each stock among all of them."""
+    from .sessions import add_pending_session
+    from .sources.assemble import WIDE, assemble
+    from .sources.snapshots import load as load_snap
+    raw = pd.read_parquet(DATA_DIR / "prices_raw.parquet", columns=["date"])
+    start = (pd.to_datetime(raw["date"]).max() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+    del raw
+    tables = assemble(start=start, **WIDE)
+    from .data.loader import _normalise
+    tables = {name: _normalise(name, df) for name, df in tables.items()}
+    tables["prices"] = add_pending_session(tables["prices"], load_snap("premarket"))
+    panel = build_panel(tables)
+    last = panel.index.get_level_values("date").max()
+    today = panel.xs(last, level="date", drop_level=False)
+    del panel
+    from .universe import liquid_mask
+    preds = model.predict(today)
+    df = pd.DataFrame(dict(mu=preds["mu"].values, liquid=liquid_mask(today).values), index=today.index.get_level_values("ticker"))
+    df = df[df["mu"].notna()]
+    df["pct"] = df["mu"].rank(pct=True)
+    rows = {t: dict(pct=round(float(r.pct), 4), lean="up" if r.pct >= 0.8 else "down" if r.pct <= 0.2 else "neutral",
+                    liquid=bool(r.liquid), tested=t in core) for t, r in df.iterrows()}
+    out = dict(date=str(last.date()), scored=len(rows), tested=int(sum(v["tested"] for v in rows.values())),
+               liquid=int(sum(v["liquid"] for v in rows.values())), stocks=rows,
+               note="pct is where the model ranks the stock among all scored stocks for this session (1 = strongest). "
+                    "'tested' stocks have a walk-forward record; the others are scored by the same model without one.")
+    _write("scores.json", out)
+    return out
+
+
 def final_model(panel, features, cal_slope, max_rows: int = 3_000_000):
     last = panel.index.get_level_values("date").max()
-    keep = [c for c in panel.columns if c in set(features) | {"z_oc", "y_dir", "r_oc", "sig_d"}]
+    # the training target must travel with the features: without it the model silently fell back to the
+    # raw open-to-close move, so the live model was not the one the backtest tested
+    keep = [c for c in panel.columns if c in set(features) | {"z_oc", "y_dir", "r_oc", "sig_d", "z5_x", SETTINGS.model.target}]
+    assert SETTINGS.model.target in keep, f"target {SETTINGS.model.target} is not in the panel"
     train = panel.loc[panel.index.get_level_values("date") < last, keep]
     train = train.iloc[-max_rows:] if len(train) > max_rows else train      # most recent rows (memory)
     m = HierarchicalModel(features).fit(train)
@@ -182,6 +288,14 @@ def run(scan_only: bool = False, reuse: bool = False):
     log("loading data")
     tables, source = load_all()
     log(f"source={source}  tickers={len(tables['tickers'])}  news={len(tables['news'])}")
+    last_close = tables["prices"]["date"].max()        # the last session with real prices, before any pending row
+    if source == "user" and os.getenv("STOCKGPT_PENDING_SESSION", "1") == "1":
+        # Scan the session that has not traded yet: it sees every article published since the last close.
+        from .sessions import add_pending_session
+        from .sources.snapshots import load as load_snap
+        last = tables["prices"]["date"].max()
+        tables["prices"] = add_pending_session(tables["prices"], load_snap("premarket"))
+        log(f"last close {pd.Timestamp(last).date()}; scanning for {pd.Timestamp(tables['prices']['date'].max()).date()}")
     panel = build_panel(tables)
     feats = feature_columns(panel)
     log(f"panel {panel.shape}  features={len(feats)}")
@@ -200,6 +314,8 @@ def run(scan_only: bool = False, reuse: bool = False):
         cal = info["last_model"].cal_slope
 
     sig = build_signals(panel, preds, slim=True)
+    done = sig["r_oc"].notna().groupby(level="date").any()      # the pending session has no outcome yet: not a backtest day
+    sig = sig[sig.index.get_level_values("date").isin(done[done].index)]
     vendor_iv = panel.attrs.get("iv_source", "vendor") == "vendor"
     res = simulate(sig, straddles=vendor_iv)
     curve, trades = res["curve"], res["trades"]
@@ -208,7 +324,7 @@ def run(scan_only: bool = False, reuse: bool = False):
 
     if not scan_only:
         strat = {}
-        TRIALS = 14          # strategy / model variants tried on this data so far (ablation + research + sizing)
+        TRIALS = 20          # strategy / model variants tried on this data so far (ablation + research + sizing)
         for col, key in (("swing", "swing_5d"), ("stock", "stock_daytrade"), ("options", "options_daytrade"),
                          ("straddle", "earnings_straddle")):
             if col not in curve:
@@ -250,10 +366,20 @@ def run(scan_only: bool = False, reuse: bool = False):
         ticker_profiles(panel, sig, trades, tables, model, acc_detail)
 
     brief = run_scan(panel, tables, model)
+    brief["data_used"] = data_used(tables, brief["scan_date"])
+    if source == "user" and (DATA_DIR / "prices_raw.parquet").exists():
+        log("scoring every listed stock")
+        try:
+            sc = score_all(model, set(tables["tickers"]["ticker"]))
+            brief["scored"] = dict(all=sc["scored"], tested=sc["tested"], liquid=sc["liquid"])
+            log(f"  {sc['scored']:,} stocks scored for {sc['date']} ({sc['tested']:,} with a tested record)")
+        except MemoryError:
+            log("  skipped: not enough memory")
+    brief["made_at"] = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")      # when this scan was produced
     _write("brief.json", brief)
     dates = panel.index.get_level_values("date").unique()
     _write("meta.json", dict(source=source, generated_at=datetime.now(timezone.utc).isoformat(),
-                             data_start=str(dates.min().date()), data_end=str(dates.max().date()),
+                             data_start=str(dates.min().date()), data_end=str(pd.Timestamp(last_close).date()),
                              tickers=int(len(tables["tickers"])), news=int(len(tables["news"])),
                              universe=brief["universe_size"], features=len(feats),
                              iv_source=panel.attrs.get("iv_source", "vendor"),

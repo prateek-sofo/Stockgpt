@@ -117,36 +117,46 @@ def fundamentals(ciks: set[int], zip_path: Path | None = None) -> pd.DataFrame:
                 cur = series["shares"].get(r["end"])
                 if cur is None or r["filed"] < cur["filed"]:
                     series["shares"][r["end"]] = r
-            if "revenue" not in series:
-                continue
-            df = pd.DataFrame({c: {e: r["val"] for e, r in s.items()} for c, s in series.items()})
-            filed = pd.DataFrame({c: {e: r["filed"] for e, r in s.items()} for c, s in series.items()})
-            df.index = pd.to_datetime(df.index)
-            df = df.sort_index()
-            filed = filed.apply(pd.to_datetime)
-            df["filed"] = filed.reindex(df.index.strftime("%Y-%m-%d")).max(axis=1).values
-            # YoY on the quarter four periods back (matched by period end within ~1 year)
-            # same quarter one year earlier, matched by period end (+/- 20 days), not by position
-            prev = df.reindex(df.index - pd.Timedelta(days=364), method="nearest",
-                              tolerance=pd.Timedelta(days=20))
-            prev.index = df.index
-            ttm_rev = df["revenue"].rolling(4).sum()
-            out.append(pd.DataFrame({
-                "cik": cik, "period_end": df.index, "report_date": df["filed"].values,
-                "revenue": df["revenue"].values,
-                "revenue_growth_yoy": (df["revenue"] / prev["revenue"] - 1).values,
-                "gross_margin": (df.get("gross_profit") / df["revenue"]).values if "gross_profit" in df else np.nan,
-                "operating_margin": (df.get("operating_income") / df["revenue"]).values if "operating_income" in df else np.nan,
-                "net_margin": (df.get("net_income") / df["revenue"]).values if "net_income" in df else np.nan,
-                "fcf_margin": ((df.get("cfo") - df.get("capex").fillna(0)) / df["revenue"]).values
-                if "cfo" in df and "capex" in df else np.nan,
-                "eps": df.get("eps", pd.Series(np.nan, index=df.index)).values,
-                "eps_growth_yoy": ((df["eps"] - prev["eps"]) / prev["eps"].abs().replace(0, np.nan)).values
-                if "eps" in df else np.nan,
-                "net_debt_to_revenue": ((df.get("debt", 0) - df.get("cash", 0)) / ttm_rev).values
-                if "debt" in df or "cash" in df else np.nan,
-                "shares": df.get("shares", pd.Series(np.nan, index=df.index)).values,
-            }))
+            frame = company_frame(cik, series)
+            if frame is not None:
+                out.append(frame)
+    return finish(out)
+
+
+def company_frame(cik: int, series: dict[str, dict[str, dict]]) -> pd.DataFrame | None:
+    """Ratios for one company from {concept: {period_end: {val, filed}}}. Shared by every source of
+    financials (SEC bulk file here, Sofo World observations in sofo_finance)."""
+    if "revenue" not in series:
+        return None
+    df = pd.DataFrame({c: {e: r["val"] for e, r in s.items()} for c, s in series.items()})
+    filed = pd.DataFrame({c: {e: r["filed"] for e, r in s.items()} for c, s in series.items()})
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    filed = filed.apply(pd.to_datetime)
+    df["filed"] = filed.reindex(df.index.strftime("%Y-%m-%d")).max(axis=1).values
+    # same quarter one year earlier, matched by period end (+/- 20 days), not by position
+    prev = df.reindex(df.index - pd.Timedelta(days=364), method="nearest", tolerance=pd.Timedelta(days=20))
+    prev.index = df.index
+    ttm_rev = df["revenue"].rolling(4).sum()
+    return pd.DataFrame({
+        "cik": cik, "period_end": df.index, "report_date": df["filed"].values,
+        "revenue": df["revenue"].values,
+        "revenue_growth_yoy": (df["revenue"] / prev["revenue"] - 1).values,
+        "gross_margin": (df.get("gross_profit") / df["revenue"]).values if "gross_profit" in df else np.nan,
+        "operating_margin": (df.get("operating_income") / df["revenue"]).values if "operating_income" in df else np.nan,
+        "net_margin": (df.get("net_income") / df["revenue"]).values if "net_income" in df else np.nan,
+        "fcf_margin": ((df.get("cfo") - df.get("capex").fillna(0)) / df["revenue"]).values
+        if "cfo" in df and "capex" in df else np.nan,
+        "eps": df.get("eps", pd.Series(np.nan, index=df.index)).values,
+        "eps_growth_yoy": ((df["eps"] - prev["eps"]) / prev["eps"].abs().replace(0, np.nan)).values
+        if "eps" in df else np.nan,
+        "net_debt_to_revenue": ((df.get("debt", 0) - df.get("cash", 0)) / ttm_rev).values
+        if "debt" in df or "cash" in df else np.nan,
+        "shares": df.get("shares", pd.Series(np.nan, index=df.index)).values,
+    })
+
+
+def finish(out: list[pd.DataFrame]) -> pd.DataFrame:
     if not out:
         return pd.DataFrame()
     f = pd.concat(out, ignore_index=True)
